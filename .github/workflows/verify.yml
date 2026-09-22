@@ -1,0 +1,40 @@
+name: Verify
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  jdk25:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: knit
+      - uses: actions/checkout@v4
+        with:
+          repository: archaic-java/service-catalog
+          ref: 5265d7bb7549a5325fe39ee26b2ce1f4e4f0aeb3
+          path: service-catalog
+      - uses: actions/checkout@v4
+        with:
+          repository: archaic-java/peep
+          ref: b97658043f3eead9f62569c16b650432c45aaee5
+          path: peep
+      - uses: actions/checkout@v4
+        with:
+          repository: archaic-java/minau
+          ref: 7abc609a7092dc6491d9af299499cfe434ad7f23
+          path: minau
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Compile and test
+        working-directory: knit
+        run: |
+          javac @cmd/compile
+          java @cmd/test
+          bin/knit --version
+          bin/knit compile
+          java --module-path knit-out --module work.archaic.knit/work.archaic.knit.Main --version

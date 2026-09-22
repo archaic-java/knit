@@ -1,0 +1,5 @@
+--release 25
+--module-source-path src:lib/src
+--module work.archaic.knit,work.archaic.knit.test,work.archaic.service.catalog,work.archaic.peep,work.archaic.minau
+-d out
+-Xlint:all
