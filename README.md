@@ -96,7 +96,7 @@ modules and chosen providers. This example's hash is a placeholder:
 
 ```xml
 <knit version="1">
-  <dependency url="https://example.org/releases/work.archaic.example.knit.jar"
+  <dependency url="https://example.org/releases/work.archaic.example-260923-1425.knit.jar"
       sha256="REPLACE_WITH_64_HEXADECIMAL_CHARACTERS"/>
 </knit>
 ```
@@ -139,7 +139,11 @@ registry, signing, certificate trust policy, or automatic upgrade.
 knit package work.archaic.example
 ```
 
-This creates `dist/work.archaic.example.knit.jar` and reports its SHA-256 digest.
+This creates a file such as `dist/work.archaic.example-260923-1425.knit.jar`
+and reports its SHA-256 digest. The suffix before `.knit.jar` is the packaging
+time in UTC (`YYMMDD-HHmm`), accurate to the minute. Files for the same module
+sort from older to newer within a century. Packaging in the same minute replaces
+that minute's file; packages from earlier minutes remain in `dist`.
 Select exactly one module from `src/<module-name>` or `lib/src/<module-name>`;
 linked module directories are supported. No knit.xml or prior compilation is
 required. Packaging is offline and does not fetch or resolve dependencies.
@@ -160,8 +164,9 @@ and module name, but does not type-check the module or certify compatibility.
 
 Entries have fixed timestamps and deterministic ordering, so unchanged inputs
 produce the same bytes with the same JDK implementation regardless of source-file
-modification times. Repackaging replaces the named artifact only after a complete,
-validated temporary archive is ready. Failure preserves an existing archive.
+modification times. The packaging time appears only in the filename, not in the
+archive bytes or manifest. Repackaging replaces the named artifact only after a
+complete, validated temporary archive is ready. Failure preserves an existing archive.
 The `dist` directory and destination file may not be symbolic links, and packaging
 never deletes other files in `dist`. Concurrent successful packages use last-writer
 wins publication; callers should not edit sources during packaging.

@@ -9,9 +9,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.TreeMap;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
@@ -23,6 +27,7 @@ import javax.tools.ToolProvider;
 final class Packaging {
     // Stay away from the ZIP epoch boundary, which triggers timezone-dependent extended timestamps.
     private static final LocalDateTime ARCHIVE_TIME = LocalDateTime.of(2000, 1, 1, 0, 0);
+    private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyMMdd-HHmm", Locale.ROOT).withZone(ZoneOffset.UTC);
     private Packaging() {}
 
     static void run(Project project, String module, PrintWriter output) throws Exception {
@@ -37,7 +42,7 @@ final class Packaging {
         if (source.startsWith(realDist) || realDist.startsWith(source))
             throw new InputFailure("Package output overlaps module sources");
         Files.createDirectories(dist);
-        Path target = dist.resolve(module + ".knit.jar");
+        Path target = dist.resolve(module + "-" + FILE_TIME.format(Instant.now()) + ".knit.jar");
         if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS))
             throw new InputFailure("Package output must be a regular file: " + target);
         Path temporary = Files.createTempFile(dist, ".knit-package-", ".tmp");
