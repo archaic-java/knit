@@ -3,10 +3,14 @@ package work.archaic.knit.test;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.jar.JarFile;
 import work.archaic.service.test.v02.TestCase;
 import work.archaic.service.test.v02.TestSuite;
@@ -35,9 +39,17 @@ record PackageRoundTrip() implements TestCase {
             author.write("src/example.other/module-info.java", "module example.other {}");
             // Packaging needs neither cached dependencies nor previously compiled output.
             author.config("minimum-jdk=\"9\"", "<dependency url=\"https://invalid.example/missing.knit.jar\" sha256=\"" + "0".repeat(64) + "\"/>");
+            Instant before = Instant.now();
             var result = author.packageModule("example.dep"); trail.note(result.output());
+            Instant after = Instant.now();
             assert result.exit() == 0 : "An explicit source module must package without compiling or acquiring dependencies";
-            var archive = author.root().resolve("dist/example.dep.knit.jar");
+            var archive = author.packaged(result);
+            var utc = DateTimeFormatter.ofPattern("yyMMdd-HHmm", Locale.ROOT).withZone(ZoneOffset.UTC);
+            assert archive.getFileName().toString().matches("example\\.dep-[0-9]{6}-[0-9]{4}\\.knit\\.jar")
+                    : "Package filenames must show a UTC minute with a two-digit year";
+            assert archive.getFileName().toString().equals("example.dep-" + utc.format(before) + ".knit.jar")
+                    || archive.getFileName().toString().equals("example.dep-" + utc.format(after) + ".knit.jar")
+                    : "The filename must use the UTC minute in which packaging began";
             assert Files.isRegularFile(archive) : "The published source archive must have the .knit.jar extension";
             assert !Files.exists(author.root().resolve("out")) && !Files.exists(author.cache()) : "Packaging must not compile or fetch";
             assert !Files.exists(author.root().resolve("src/example.dep/META-INF")) : "Packaging must not introduce metadata files into source modules";
@@ -72,7 +84,7 @@ record RepeatablePackage() implements TestCase {
             f.app("", "");
             var first = f.packageModule("example.app"); trail.note(first.output());
             assert first.exit() == 0 : "A conventional module must package without knit.xml";
-            var artifact = f.root().resolve("dist/example.app.knit.jar");
+            var artifact = f.packaged(first);
             byte[] original = Files.readAllBytes(artifact);
             try (var jar = new JarFile(artifact.toFile())) {
                 assert jar.getManifest().getMainAttributes().getValue("Archaic-Minimum-JDK").equals(Integer.toString(Runtime.version().feature()))
@@ -80,17 +92,21 @@ record RepeatablePackage() implements TestCase {
             }
             Files.setLastModifiedTime(f.root().resolve("src/example.app/example/Main.java"), FileTime.fromMillis(1_000_000));
             var repeated = f.knitCommand(List.of("package", "example.app"), "-Duser.timezone=Pacific/Auckland");
-            assert repeated.exit() == 0 && Arrays.equals(original, Files.readAllBytes(artifact))
+            assert repeated.exit() == 0 && Arrays.equals(original, Files.readAllBytes(f.packaged(repeated)))
                     : "Unchanged inputs must produce identical archives despite source timestamps and timezone";
             f.write("src/example.app/example/Main.java", "package example; public class Main { public static void main(String[] args) { System.out.print(1); } }");
-            assert f.packageModule("example.app").exit() == 0 : "Repackaging changed sources must replace the previous package";
-            byte[] changed = Files.readAllBytes(artifact);
+            var changedResult = f.packageModule("example.app");
+            assert changedResult.exit() == 0 : "Repackaging changed sources must publish a new package";
+            var changedArtifact = f.packaged(changedResult);
+            byte[] changed = Files.readAllBytes(changedArtifact);
             assert !Arrays.equals(original, changed) : "Changed source content must change the artifact";
+            long packagesBeforeFailure;
+            try (var files = Files.list(f.root().resolve("dist"))) { packagesBeforeFailure = files.count(); }
             f.write("src/example.app/config.properties", "runtime.resource=true");
             assert f.packageModule("example.app").exit() == 2 : "Unsupported runtime resources must not be silently dropped";
-            assert Arrays.equals(changed, Files.readAllBytes(artifact)) : "Failed packaging must preserve the previous complete artifact";
+            assert Arrays.equals(changed, Files.readAllBytes(changedArtifact)) : "Failed packaging must preserve the previous complete artifact";
             try (var files = Files.list(f.root().resolve("dist"))) {
-                assert files.count() == 1 : "Packaging must leave no temporary artifacts behind";
+                assert files.count() == packagesBeforeFailure : "Packaging must leave no temporary artifacts behind";
             }
         }
     }
@@ -104,7 +120,7 @@ record PackageLinkedModule() implements TestCase {
             Files.createSymbolicLink(f.root().resolve("lib/src/example.linked"), f.root().resolve("sibling/example.linked"));
             var result = f.packageModule("example.linked"); trail.note(result.output());
             assert result.exit() == 0 : "Explicitly selected linked modules must package without dependency resolution";
-            assert Files.isRegularFile(f.root().resolve("dist/example.linked.knit.jar")) : "Linked modules use the same output naming convention";
+            assert Files.isRegularFile(f.packaged(result)) : "Linked modules use the same output naming convention";
         }
     }
 }
@@ -127,7 +143,10 @@ record RejectPackage(String kind) implements TestCase {
                 case "output-link" -> Files.createSymbolicLink(f.root().resolve("dist"), f.root().resolve("src/example.app"));
                 case "target-link" -> {
                     Files.createDirectories(f.root().resolve("dist"));
-                    Files.createSymbolicLink(f.root().resolve("dist/example.app.knit.jar"), f.root().resolve("src/example.app/module-info.java"));
+                    var utc = DateTimeFormatter.ofPattern("yyMMdd-HHmm", Locale.ROOT).withZone(ZoneOffset.UTC);
+                    for (int offset = -1; offset <= 1; offset++)
+                        Files.createSymbolicLink(f.root().resolve("dist/example.app-" + utc.format(Instant.now().plusSeconds(60L * offset)) + ".knit.jar"),
+                                f.root().resolve("src/example.app/module-info.java"));
                 }
                 default -> throw new IllegalArgumentException(kind);
             }

@@ -62,6 +62,10 @@ record Fixture(Path root, Path cache) implements AutoCloseable {
     Result packageModule(String module) throws Exception {
         return knitCommand(java.util.List.of("package", module));
     }
+    Path packaged(Result result) {
+        String line = result.output().lines().filter(value -> value.startsWith("Packaged dist/")).findFirst().orElseThrow();
+        return root.resolve(line.substring("Packaged ".length()));
+    }
     Result knitCommand(java.util.List<String> command, String... properties) throws Exception {
         var args = new java.util.ArrayList<String>();
         args.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
