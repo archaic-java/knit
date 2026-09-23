@@ -35,7 +35,7 @@ final class Artifacts {
 
     Path require(Project.Dependency dependency) throws IOException, InputFailure {
         Path file = path(dependency);
-        if (!Files.isRegularFile(file)) throw new InputFailure("Missing artifact for " + dependency.module() + "; run knit fetch");
+        if (!Files.isRegularFile(file)) throw new InputFailure("Missing artifact for " + dependency.label() + "; run knit fetch");
         verify(file, dependency);
         return file;
     }
@@ -47,7 +47,7 @@ final class Artifacts {
                 Path target = path(dependency);
                 if (Files.exists(target)) {
                     verify(target, dependency);
-                    output.println("Verified cached " + dependency.module());
+                    output.println("Verified cached " + dependency.label());
                     continue;
                 }
                 Files.createDirectories(target.getParent());
@@ -56,7 +56,7 @@ final class Artifacts {
                     download(client, dependency, temporary);
                     // Same digest means concurrent publishers must publish identical bytes.
                     Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
-                    output.println("Fetched " + dependency.module());
+                    output.println("Fetched " + dependency.label());
                 } finally { Files.deleteIfExists(temporary); }
             }
         }
@@ -73,14 +73,14 @@ final class Artifacts {
             try (var body = response.body()) {
                 int status = response.statusCode();
                 if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
-                    if (redirects == 5) throw new InputFailure("Too many redirects for " + dependency.module());
+                    if (redirects == 5) throw new InputFailure("Too many redirects for " + dependency.label());
                     String location = response.headers().firstValue("Location")
-                            .orElseThrow(() -> new InputFailure("Redirect without Location for " + dependency.module()));
+                            .orElseThrow(() -> new InputFailure("Redirect without Location for " + dependency.label()));
                     try { url = url.resolve(location); }
-                    catch (IllegalArgumentException error) { throw new InputFailure("Invalid redirect for " + dependency.module()); }
+                    catch (IllegalArgumentException error) { throw new InputFailure("Invalid redirect for " + dependency.label()); }
                     continue;
                 }
-                if (status != 200) throw new InputFailure("HTTP " + status + " fetching " + dependency.module());
+                if (status != 200) throw new InputFailure("HTTP " + status + " fetching " + dependency.label());
                 var digest = sha256();
                 // Header timeout alone does not bound a streaming response body.
                 try (var timer = Executors.newSingleThreadScheduledExecutor()) {
@@ -92,17 +92,17 @@ final class Artifacts {
                         long size = 0;
                         for (int count; (count = body.read(buffer)) != -1;) {
                             size += count;
-                            if (size > 512L * 1024 * 1024) throw new InputFailure("Artifact exceeds 512 MiB: " + dependency.module());
+                            if (size > 512L * 1024 * 1024) throw new InputFailure("Artifact exceeds 512 MiB: " + dependency.label());
                             sink.write(buffer, 0, count);
                         }
                     } finally { deadline.cancel(false); }
                 }
                 if (!HexFormat.of().formatHex(digest.digest()).equals(dependency.sha256()))
-                    throw new InputFailure("SHA-256 mismatch for " + dependency.module() + "; cache unchanged");
+                    throw new InputFailure("SHA-256 mismatch for " + dependency.label() + "; cache unchanged");
                 return;
             }
         }
-        throw new InputFailure("Download did not complete: " + dependency.module());
+        throw new InputFailure("Download did not complete: " + dependency.label());
     }
 
     static void verify(Path file, Project.Dependency dependency) throws IOException, InputFailure {
@@ -112,7 +112,7 @@ final class Artifacts {
             for (int count; (count = input.read(buffer)) != -1;) digest.update(buffer, 0, count);
         }
         if (!HexFormat.of().formatHex(digest.digest()).equals(dependency.sha256()))
-            throw new InputFailure("SHA-256 mismatch for " + dependency.module() + "; remove the corrupt cache entry and run knit fetch");
+            throw new InputFailure("SHA-256 mismatch for " + dependency.label() + "; remove the corrupt cache entry and run knit fetch");
     }
 
     private static MessageDigest sha256() {

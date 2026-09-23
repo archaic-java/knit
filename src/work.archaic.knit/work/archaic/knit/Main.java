@@ -24,7 +24,7 @@ public final class Main {
             return 0;
         }
         if (args.length == 1 && (args[0].equals("--help") || args[0].equals("help"))) {
-            System.out.println("Usage: knit fetch | compile | --version\nRun from a project containing knit.xml. Compilation is offline.");
+            System.out.println("Usage: knit fetch | compile | --version\nRun from the project root; knit.xml is optional. Compilation is offline.");
             return 0;
         }
         if (args.length != 1 || !(args[0].equals("fetch") || args[0].equals("compile"))) {

@@ -8,6 +8,15 @@ import java.util.jar.JarFile;
 final class SourceArchive {
     private SourceArchive() {}
 
+    static String kind(Path path) throws IOException, InputFailure {
+        try (var jar = new JarFile(path.toFile(), false)) {
+            boolean source = jar.getEntry("module-info.java") != null;
+            boolean binary = jar.stream().anyMatch(entry -> entry.getName().endsWith(".class"));
+            if (source && binary) throw new InputFailure("Ambiguous source/binary archive: " + path);
+            return source ? "source" : "binary";
+        }
+    }
+
     static void validate(Path path) throws IOException, InputFailure {
         try (var jar = new JarFile(path.toFile(), false)) {
             var manifest = jar.getManifest();

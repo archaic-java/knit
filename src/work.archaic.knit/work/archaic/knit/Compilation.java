@@ -14,9 +14,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
@@ -41,7 +39,6 @@ final class Compilation {
         var binaryPaths = new ArrayList<Path>();
         var protectedPaths = new ArrayList<Path>();
         protectedPaths.add(project.root().resolve("knit.xml"));
-        var roots = new LinkedHashSet<String>();
         var archives = new ArrayList<FileSystem>();
         try (var files = compiler.getStandardFileManager(messages, java.util.Locale.ROOT, java.nio.charset.StandardCharsets.UTF_8)) {
             var sourcePaths = new HashSet<Path>();
@@ -63,13 +60,6 @@ final class Compilation {
                     }
                 }
             }
-            if (project.modules().isEmpty()) roots.addAll(sourceModules.keySet());
-            else {
-                for (String name : project.modules()) {
-                    if (!sourceModules.containsKey(name)) throw new InputFailure("Unknown local compile root: " + name);
-                    roots.add(name);
-                }
-            }
             var binaryLocations = new HashSet<Path>();
             for (Path path : project.modulePaths()) {
                 if (!Files.exists(path)) throw new InputFailure("Missing module path: " + path);
@@ -87,31 +77,32 @@ final class Compilation {
             for (var dependency : project.dependencies()) {
                 Path jar = artifacts.require(dependency);
                 protectedPaths.add(jar);
-                if (dependency.kind().equals("binary")) {
-                    addBinary(jar, dependency.module(), binaryNames, binaryPaths, binaryLocations);
+                String kind = SourceArchive.kind(jar);
+                if (!dependency.kind().isEmpty() && !dependency.kind().equals(kind))
+                    throw new InputFailure("Expected " + dependency.kind() + " artifact for " + dependency.label() + " but found " + kind);
+                if (kind.equals("binary")) {
+                    addBinary(jar, dependency.module().isEmpty() ? null : dependency.module(), binaryNames, binaryPaths, binaryLocations);
                 } else {
                     SourceArchive.validate(jar);
                     var archive = FileSystems.newFileSystem(jar);
                     archives.add(archive);
                     Path root = archive.getPath("/");
-                    if (sourceModules.putIfAbsent(dependency.module(), root) != null)
-                        throw new InputFailure("Duplicate module: " + dependency.module());
-                    messages.archive(root, dependency.module());
-                    roots.add(dependency.module());
+                    messages.archive(root, dependency.label());
+                    String name = sourceName(compiler, files, messages, output, root);
+                    if (!dependency.module().isEmpty() && !dependency.module().equals(name))
+                        throw new InputFailure("Module descriptor does not match expected module " + dependency.module());
+                    if (sourceModules.putIfAbsent(name, root) != null)
+                        throw new InputFailure("Duplicate module: " + name);
+                    messages.archive(root, name);
                 }
             }
             for (String name : sourceModules.keySet())
                 if (binaryNames.contains(name)) throw new InputFailure("Source/binary module collision: " + name);
-            if (roots.isEmpty()) throw new InputFailure("No source modules selected");
+            if (sourceModules.isEmpty()) throw new InputFailure("No source modules selected");
             // Parse descriptors with the public tree API; Java remains the compiler's language.
             for (var entry : sourceModules.entrySet()) {
-                var units = files.getJavaFileObjectsFromPaths(List.of(entry.getValue().resolve("module-info.java")));
-                var task = (JavacTask) compiler.getTask(output, files, messages, List.of("-proc:none"), null, units);
-                for (var unit : task.parse()) {
-                    if (messages.hasErrors()) throw new CompilationFailure();
-                    if (unit.getModule() == null || !unit.getModule().getName().toString().equals(entry.getKey()))
-                        throw new InputFailure("Module descriptor does not match expected module " + entry.getKey());
-                }
+                if (!sourceName(compiler, files, messages, output, entry.getValue()).equals(entry.getKey()))
+                    throw new InputFailure("Module descriptor does not match expected module " + entry.getKey());
             }
             if (messages.hasErrors()) throw new CompilationFailure();
             for (var entry : sourceModules.entrySet())
@@ -120,8 +111,7 @@ final class Compilation {
             files.setLocationFromPaths(StandardLocation.CLASS_PATH, List.of());
             try (var destination = new Output(project, protectedPaths, artifacts.root())) {
                 var options = new ArrayList<>(List.of("-proc:none", "-encoding", "UTF-8", "-d", destination.staging().toString(),
-                        "--module", String.join(",", roots)));
-                if (!project.release().isEmpty()) { options.add("--release"); options.add(project.release()); }
+                        "--module", String.join(",", sourceModules.keySet())));
                 if (!project.lint().isEmpty()) options.add("-Xlint:" + project.lint());
                 if (project.werror()) options.add("-Werror");
                 boolean success = compiler.getTask(output, files, messages, options, null, null).call();
@@ -139,6 +129,20 @@ final class Compilation {
             }
             if (failure != null) throw failure;
         }
+    }
+
+    private static String sourceName(javax.tools.JavaCompiler compiler, javax.tools.StandardJavaFileManager files,
+            Messages messages, PrintWriter output, Path root) throws Exception {
+        var units = files.getJavaFileObjectsFromPaths(List.of(root.resolve("module-info.java")));
+        var task = (JavacTask) compiler.getTask(output, files, messages, List.of("-proc:none"), null, units);
+        String name = null;
+        for (var unit : task.parse()) {
+            if (messages.hasErrors()) throw new CompilationFailure();
+            if (unit.getModule() != null) name = unit.getModule().getName().toString();
+        }
+        if (name == null) throw new InputFailure("Missing module declaration: " + root);
+        Project.moduleName(name);
+        return name;
     }
 
     private static void addBinary(Path path, String expected, java.util.Set<String> names, List<Path> paths,
