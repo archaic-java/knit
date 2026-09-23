@@ -36,3 +36,39 @@ jobs:
           javac @cmd/compile
           java @cmd/test
           bin/knit --version
+      - name: Assemble and smoke test distribution
+        working-directory: knit
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${GITHUB_SHA:0:12}"
+          fi
+          sh cmd/distribute "$version"
+          mkdir -p "$RUNNER_TEMP/knit-smoke"
+          tar -xzf dist/knit-*.tar.gz -C "$RUNNER_TEMP/knit-smoke"
+          (cd "$RUNNER_TEMP" && "$RUNNER_TEMP/knit-smoke/knit/bin/knit" --version)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knit-cli
+          path: |
+            knit/dist/knit-*.tar.gz
+            knit/dist/knit-*.tar.gz.sha256
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: jdk25
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: knit-cli
+      - name: Attach CLI archive to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null ||
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          gh release upload "$GITHUB_REF_NAME" knit-*.tar.gz knit-*.tar.gz.sha256 --repo "$GITHUB_REPOSITORY" --clobber

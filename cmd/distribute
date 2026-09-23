@@ -1,0 +1,32 @@
+#!/bin/sh
+# Assemble a portable CLI archive from compiled production modules.
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: cmd/distribute <version>" >&2
+    exit 2
+fi
+case "$1" in
+    ''|*[!a-zA-Z0-9._-]*) echo "Invalid distribution version: $1" >&2; exit 2 ;;
+esac
+
+cd "$(dirname "$0")/.."
+mkdir -p dist
+stage=$(mktemp -d "dist/.knit-distribute.XXXXXX")
+trap 'rm -rf "$stage"' EXIT HUP INT TERM
+mkdir -p "$stage/knit/bin" "$stage/knit/modules"
+cp bin/knit "$stage/knit/bin/knit"
+
+for module in work.archaic.knit work.archaic.peep work.archaic.service.catalog; do
+    if [ ! -f "out/$module/module-info.class" ]; then
+        echo "Missing compiled module $module; run javac @cmd/compile first" >&2
+        exit 2
+    fi
+    jar --create --no-manifest --file "$stage/knit/modules/$module.jar" -C "out/$module" .
+done
+
+archive="knit-$1.tar.gz"
+tar -czf "$stage/$archive" -C "$stage" knit
+mv "$stage/$archive" "dist/$archive"
+(cd dist && sha256sum "$archive" > "$archive.sha256")
+cat "dist/$archive.sha256"

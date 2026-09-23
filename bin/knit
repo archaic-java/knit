@@ -1,4 +1,9 @@
 #!/bin/sh
 set -eu
 knit_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-exec java --module-path "$knit_dir/out" --module work.archaic.knit/work.archaic.knit.Main "$@"
+if [ -d "$knit_dir/modules" ]; then
+    module_path="$knit_dir/modules"
+else
+    module_path="$knit_dir/out"
+fi
+exec java --module-path "$module_path" --module work.archaic.knit/work.archaic.knit.Main "$@"

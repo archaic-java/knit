@@ -34,8 +34,26 @@ two existing serialVersionUID warnings in the pinned catalog with all lint check
 
 `bin/knit` finds its compiled installation relative to the script and invokes
 `java` on PATH. Put this repository's `bin` directory on PATH. Do not move or
-symlink the script away from its installation; the supported installation is the
-checkout plus compiled `out/`. Its working directory remains the consuming project.
+symlink the script away from its installation; it uses the checkout's compiled
+`out/` or the distribution's modular JARs. Its working directory remains the
+consuming project.
+
+To build a downloadable CLI archive after compiling and testing, run
+`sh cmd/distribute <version>`. The resulting `dist/knit-<version>.tar.gz` holds
+the launcher and modular JARs for Knit, Peep, and the service catalog. Minau and
+test modules are excluded. A matching `.sha256` file records the archive digest.
+CI smoke-tests the extracted archive and publishes both files
+as a workflow artifact; a `v*` tag also creates a GitHub Release with that archive.
+The archive needs a JDK 25 or later on PATH, but no sibling source checkouts:
+
+```sh
+tar -xzf knit-<version>.tar.gz
+export PATH="$PWD/knit/bin:$PATH"
+knit --version
+```
+
+The launcher uses `modules/` in a distribution and `out/` in a source checkout.
+Keep it in its installation directory; it resolves its modules relative to itself.
 
 Knit does not use itself to build this repository. Its build is defined only by
 `cmd/compile`, `cmd/test`, and dependency links; CI tests behavior with isolated
