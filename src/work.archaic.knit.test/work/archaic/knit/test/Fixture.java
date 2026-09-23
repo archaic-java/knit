@@ -57,11 +57,18 @@ record Fixture(Path root, Path cache) implements AutoCloseable {
         return "<dependency module=\"" + module + "\" kind=\"source\" url=\"" + url + "\" sha256=\"" + hash + "\"/>";
     }
     Result knit(String command, String... properties) throws Exception {
+        return knitCommand(java.util.List.of(command), properties);
+    }
+    Result packageModule(String module) throws Exception {
+        return knitCommand(java.util.List.of("package", module));
+    }
+    Result knitCommand(java.util.List<String> command, String... properties) throws Exception {
         var args = new java.util.ArrayList<String>();
         args.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         args.add("-Xshare:off");
         args.addAll(java.util.List.of(properties));
-        args.addAll(java.util.List.of("--module-path", MODULES.toString(), "--module", "work.archaic.knit/work.archaic.knit.Main", command));
+        args.addAll(java.util.List.of("--module-path", MODULES.toString(), "--module", "work.archaic.knit/work.archaic.knit.Main"));
+        args.addAll(command);
         var builder = new ProcessBuilder(args).directory(root.toFile());
         builder.environment().put("KNIT_CACHE", cache.toString());
         return execute(builder);

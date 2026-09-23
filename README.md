@@ -2,7 +2,8 @@
 
 Knit compiles explicitly selected Java modules with your JDK. It reads source
 JARs without extracting them, presents compiler diagnostics with source excerpts,
-and downloads dependencies whose complete archive bytes are pinned by SHA-256.
+downloads dependencies whose complete archive bytes are pinned by SHA-256, and
+packages source modules as `.knit.jar` distributions.
 
 The CLI is `knit`; its module is `work.archaic.knit`. JDK 25 or later is required.
 JDK 25 is the tested baseline. The running JDK supplies Java syntax and compilation;
@@ -95,7 +96,7 @@ modules and chosen providers. This example's hash is a placeholder:
 
 ```xml
 <knit version="1">
-  <dependency url="https://example.org/releases/example-sources.jar"
+  <dependency url="https://example.org/releases/work.archaic.example.knit.jar"
       sha256="REPLACE_WITH_64_HEXADECIMAL_CHARACTERS"/>
 </knit>
 ```
@@ -131,6 +132,46 @@ include the selected binary JARs on your application's runtime module path.
 missing modules. Missing artifacts explain how to run fetch; missing Java modules
 are compiler diagnostics. There is no transitive resolution, version selection,
 registry, signing, certificate trust policy, or automatic upgrade.
+
+## Package a module
+
+```sh
+knit package work.archaic.example
+```
+
+This creates `dist/work.archaic.example.knit.jar` and reports its SHA-256 digest.
+Select exactly one module from `src/<module-name>` or `lib/src/<module-name>`;
+linked module directories are supported. No knit.xml or prior compilation is
+required. Packaging is offline and does not fetch or resolve dependencies.
+
+The result is a **source archive**, containing the selected module's Java sources,
+legal notices, and a generated `META-INF/MANIFEST.MF`. There are no compiled classes
+or bundled dependencies. No META-INF files are added to the source tree. Project
+root legal notices are included as well; a module-specific notice takes precedence
+when it has the same archive path. Unsupported files, including runtime resources,
+class files, and source-tree symlinks, fail clearly instead of being silently omitted.
+A module directory itself may be a link, but links inside it are rejected.
+
+The generated manifest uses source format 1. Its required `Archaic-Minimum-JDK`
+value comes from the project's optional `minimum-jdk`, or the running JDK when
+omitted. The fallback records the packaging JDK; it does not infer the earliest
+JDK that could compile the sources. Packaging verifies the descriptor's syntax
+and module name, but does not type-check the module or certify compatibility.
+
+Entries have fixed timestamps and deterministic ordering, so unchanged inputs
+produce the same bytes with the same JDK implementation regardless of source-file
+modification times. Repackaging replaces the named artifact only after a complete,
+validated temporary archive is ready. Failure preserves an existing archive.
+The `dist` directory and destination file may not be symbolic links, and packaging
+never deletes other files in `dist`. Concurrent successful packages use last-writer
+wins publication; callers should not edit sources during packaging.
+
+The `.knit.jar` suffix identifies Knit's generated source distributions. Readers
+still validate contents and accept existing source archives ending in `.jar`;
+renaming an arbitrary JAR does not make it a valid Knit source archive.
+
+Upload the generated file wherever you publish releases. Consumers can declare its
+URL and printed digest and use the existing `fetch` and `compile` commands.
 
 ## Source archives
 
@@ -182,15 +223,15 @@ Diagnostics and progress use stderr. Help and version use stdout. Exit statuses:
 
 Minau tests run isolated CLI processes and verify compilation from source JARs,
 service discovery, diagnostics, hashes, malformed inputs, output safety, removal of
-stale classes, and HTTPS acquisition through a local TLS server. Tests require no
+stale classes, HTTPS acquisition through a local TLS server, and packaging/consuming source archives. Tests require no
 external network access; `keytool` creates an ephemeral test certificate.
 
 Knit's bootstrap uses plain JDK commands. Compilation itself uses the public
-JavaCompiler and JavacTask tree APIs, with no compiler internals. Fetch and compile
+JavaCompiler and JavacTask tree APIs, with no compiler internals. Fetch, compile, and package
 are distinct logging v02 Goals. No contracts or provider implementations are copied
 into this repository. The implementation is intentionally one production module.
 
 A future metadata registry can help discover catalogs, providers, URLs, and hashes.
 Accepted selections would still be explicit project inputs. Runtime launching,
-test orchestration, incremental compilation, publishing, signatures, and registry
+test orchestration, incremental compilation, release uploading, signatures, and registry
 protocols are outside this initial version.
