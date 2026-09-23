@@ -36,5 +36,3 @@ jobs:
           javac @cmd/compile
           java @cmd/test
           bin/knit --version
-          bin/knit compile
-          java --module-path knit-out --module work.archaic.knit/work.archaic.knit.Main --version

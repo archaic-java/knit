@@ -1,6 +1,5 @@
 package work.archaic.knit;
 
-import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,12 +16,30 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.DefaultHandler;
 
-record Project(Path root, Path output, String release, String lint, boolean werror,
-        List<Path> sourceRoots, List<String> modules, List<Path> modulePaths, List<Dependency> dependencies) {
-    record Dependency(String module, String kind, URI url, String sha256) {}
+record Project(Path root, String lint, boolean werror, List<Dependency> dependencies) {
+    record Dependency(String module, String kind, URI url, String sha256) {
+        String label() { return module.isEmpty() ? url.toString() : module; }
+    }
+
+    Path output() { return root.resolve("out"); }
+
+    List<Path> sourceRoots() {
+        var paths = new ArrayList<Path>();
+        paths.add(root.resolve("src"));
+        Path linked = root.resolve("lib/src");
+        if (Files.exists(linked, java.nio.file.LinkOption.NOFOLLOW_LINKS)) paths.add(linked);
+        return List.copyOf(paths);
+    }
+
+    List<Path> modulePaths() {
+        Path binaries = root.resolve("lib/bin");
+        return Files.exists(binaries, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? List.of(binaries) : List.of();
+    }
 
     static Project read(Path root) throws Exception {
         root = root.toRealPath();
+        if (!Files.exists(root.resolve("knit.xml"), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            return new Project(root, "all", false, List.of());
         var factory = DocumentBuilderFactory.newInstance();
         factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -45,12 +62,8 @@ record Project(Path root, Path output, String release, String lint, boolean werr
         if (!document.getTagName().equals("knit")) throw new InputFailure("Expected <knit> root");
         attributes(document, "version");
         if (!required(document, "version").equals("1")) throw new InputFailure("Unsupported knit.xml version");
-        String release = "", lint = "";
+        String lint = "all";
         boolean werror = false, compilerSeen = false;
-        Path output = root.resolve("out");
-        var sources = new ArrayList<Path>();
-        var modules = new ArrayList<String>();
-        var binaries = new ArrayList<Path>();
         var dependencies = new ArrayList<Dependency>();
         var names = new HashSet<String>();
         for (var element : children(document)) {
@@ -58,43 +71,32 @@ record Project(Path root, Path output, String release, String lint, boolean werr
                 case "compiler" -> {
                     if (compilerSeen) throw new InputFailure("Duplicate <compiler>");
                     compilerSeen = true;
-                    attributes(element, "release", "lint", "werror", "output");
-                    release = element.getAttribute("release");
-                    if (!release.isEmpty() && !release.matches("[1-9][0-9]*"))
-                        throw new InputFailure("release must be a Java release number");
-                    if (!release.isEmpty()) {
+                    attributes(element, "minimum-jdk", "lint", "werror");
+                    leaf(element);
+                    if (element.hasAttribute("minimum-jdk")) {
+                        String minimum = required(element, "minimum-jdk");
                         try {
-                            int value = Integer.parseInt(release);
-                            if (value < 9 || value > Runtime.version().feature())
-                                throw new InputFailure("release must be between 9 and the running JDK release");
-                        } catch (NumberFormatException error) { throw new InputFailure("Invalid release"); }
+                            if (!minimum.matches("[1-9][0-9]*")) throw new NumberFormatException();
+                            if (Integer.parseInt(minimum) > Runtime.version().feature())
+                                throw new InputFailure("Project requires JDK " + minimum + "; running JDK is " + Runtime.version().feature());
+                        } catch (NumberFormatException error) { throw new InputFailure("minimum-jdk must be a positive Java release number"); }
                     }
-                    lint = element.getAttribute("lint");
-                    if (!Set.of("", "all", "none").contains(lint))
+                    if (element.hasAttribute("lint")) lint = required(element, "lint");
+                    if (!Set.of("all", "none").contains(lint))
                         throw new InputFailure("lint supports all or none");
                     String warning = element.getAttribute("werror");
                     if (!Set.of("", "true", "false").contains(warning))
                         throw new InputFailure("werror must be true or false");
                     werror = warning.equals("true");
-                    if (element.hasAttribute("output")) output = root.resolve(required(element, "output")).normalize();
-                    for (var setting : children(element)) {
-                        switch (setting.getTagName()) {
-                            case "source-root" -> { attributes(setting, "path"); sources.add(root.resolve(required(setting, "path")).normalize()); }
-                            case "module" -> { attributes(setting, "name"); String name = required(setting, "name"); moduleName(name); modules.add(name); }
-                            case "module-path" -> { attributes(setting, "path"); binaries.add(root.resolve(required(setting, "path")).normalize()); }
-                            default -> throw new InputFailure("Unsupported compiler setting: " + setting.getTagName());
-                        }
-                        leaf(setting);
-                    }
                 }
                 case "dependency" -> {
                     attributes(element, "module", "kind", "url", "sha256");
                     leaf(element);
-                    String name = required(element, "module");
-                    moduleName(name);
-                    if (!names.add(name)) throw new InputFailure("Duplicate dependency module: " + name);
-                    String kind = required(element, "kind");
-                    if (!Set.of("source", "binary").contains(kind)) throw new InputFailure("Unsupported dependency kind: " + kind);
+                    String name = element.getAttribute("module");
+                    if (element.hasAttribute("module")) moduleName(required(element, "module"));
+                    if (!name.isEmpty() && !names.add(name)) throw new InputFailure("Duplicate dependency module: " + name);
+                    String kind = element.hasAttribute("kind") ? required(element, "kind") : "";
+                    if (!Set.of("", "source", "binary").contains(kind)) throw new InputFailure("Unsupported dependency kind: " + kind);
                     URI url;
                     try { url = URI.create(required(element, "url")); }
                     catch (IllegalArgumentException error) { throw new InputFailure("Invalid dependency URL"); }
@@ -106,10 +108,7 @@ record Project(Path root, Path output, String release, String lint, boolean werr
                 default -> throw new InputFailure("Unsupported Knit setting: " + element.getTagName());
             }
         }
-        if (sources.isEmpty()) sources.add(root.resolve("src"));
-        if (new HashSet<>(modules).size() != modules.size()) throw new InputFailure("Duplicate compile root module");
-        return new Project(root, output, release, lint, werror, List.copyOf(sources), List.copyOf(modules),
-                List.copyOf(binaries), List.copyOf(dependencies));
+        return new Project(root, lint, werror, List.copyOf(dependencies));
     }
 
     static void validateUrl(URI url) throws InputFailure {

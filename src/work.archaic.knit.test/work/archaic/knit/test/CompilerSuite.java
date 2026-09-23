@@ -18,14 +18,21 @@ public record CompilerSuite() implements TestSuite {
         for (String xml : new String[]{
                 "<knit version=\"2\"/>", "<knit version=\"1\"><compiler processor=\"anything\"/></knit>",
                 "<knit version=\"1\"><compiler werror=\"yes\"/></knit>",
-                "<knit version=\"1\"><compiler release=\"999\"/></knit>",
+                "<knit version=\"1\"><compiler minimum-jdk=\"999\"/></knit>",
                 "<!DOCTYPE knit [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><knit version=\"1\">&x;</knit>",
                 "<knit version=\"1\"><compiler><option value=\"-Xplugin:evil\"/></compiler></knit>",
-                "<knit version=\"1\"><compiler/><compiler/></knit>"}) cases.add(new RejectConfig(xml));
+                "<knit version=\"1\"><compiler/><compiler/></knit>",
+                "<knit version=\"1\"><compiler release=\"25\"/></knit>",
+                "<knit version=\"1\"><compiler minimum-jdk=\"0\"/></knit>",
+                "<knit version=\"1\"><compiler minimum-jdk=\"\"/></knit>",
+                "<knit version=\"1\"><compiler minimum-jdk=\"abc\"/></knit>"}) cases.add(new RejectConfig(xml));
         for (String output : new String[]{".", "src", "src/example.app/nested", ".git", "cache", "../outside"})
             cases.add(new UnsafeOutput(output));
         cases.add(new UnownedOutput());
-        cases.add(new SelectModule());
+        cases.add(new ConventionalSources());
+        cases.add(new MinimumJdk());
+        cases.add(new DefaultLint());
+        cases.add(new AnonymousDependencies());
         cases.add(new AutomaticBinary());
         cases.add(new ExplicitBinary());
         cases.add(new SymlinkOutput());
@@ -41,7 +48,7 @@ record CompileArchive() implements TestCase {
             fixture.app("requires example.dep;", "System.out.print(dep.Api.value());");
             var jar = fixture.jar(Map.of("module-info.java", "module example.dep { exports dep; }",
                     "dep/Api.java", "package dep; public class Api { public static String value() { return \"archive\"; } }"), "1", "25");
-            fixture.config("release=\"25\"", fixture.dependency(jar, "example.dep", "https://invalid.example/unused", true));
+            fixture.config("minimum-jdk=\"25\"", fixture.dependency(jar, "example.dep", "https://invalid.example/unused", true));
             var result = fixture.knit("compile");
             trail.note(result.output());
             assert result.exit() == 0 : "A local application must compile with archived module sources, including paths with spaces";
@@ -159,16 +166,69 @@ record UnownedOutput() implements TestCase {
     }
 }
 
-record SelectModule() implements TestCase {
+record ConventionalSources() implements TestCase {
     @Override public void run(TestTrail trail) throws Exception {
         try (var f = Fixture.create()) {
-            f.app("", "");
-            f.write("other sources/example.unselected/module-info.java", "module example.unselected {}");
-            f.write("other sources/example.unselected/broken/Bad.java", "package broken; class Bad { invalid }");
-            f.write("knit.xml", "<knit version=\"1\"><compiler release=\"25\" output=\"build classes\"><source-root path=\"src\"/><source-root path=\"other sources\"/><module name=\"example.app\"/></compiler></knit>");
+            f.app("requires example.linked;", "System.out.print(linked.Api.value());");
+            f.write("linked sources/example.linked/module-info.java", "module example.linked { exports linked; }");
+            f.write("linked sources/example.linked/linked/Api.java", "package linked; public class Api { public static String value() { return \"linked\"; } }");
+            Files.createDirectories(f.root().resolve("lib/src"));
+            Files.createSymbolicLink(f.root().resolve("lib/src/example.linked"), f.root().resolve("linked sources/example.linked"));
             var result = f.knit("compile"); trail.note(result.output());
-            assert result.exit() == 0 : "Explicit local roots must exclude unrelated modules from compilation";
-            assert Files.exists(f.root().resolve("build classes/example.app/module-info.class")) : "Configured output with spaces must work";
+            assert result.exit() == 0 : "A project with conventional source links must compile without knit.xml";
+            var run = f.launch("example.app/example.Main");
+            assert run.exit() == 0 && run.output().equals("linked") : "Linked source dependencies must participate in compilation";
+        }
+    }
+}
+
+record MinimumJdk() implements TestCase {
+    @Override public void run(TestTrail trail) throws Exception {
+        try (var f = Fixture.create()) {
+            f.app("", "System.out.print(java.util.List.of(42).getFirst());");
+            f.config("minimum-jdk=\"9\"", "");
+            var result = f.knit("compile"); trail.note(result.output());
+            assert result.exit() == 0 : "A minimum release must not restrict the running JDK's APIs";
+            byte[] bytes = Files.readAllBytes(f.root().resolve("out/example.app/example/Main.class"));
+            int major = ((bytes[6] & 255) << 8) | (bytes[7] & 255);
+            assert major == Runtime.version().feature() + 44 : "Bytecode must target the running JDK, not the minimum";
+            f.config("minimum-jdk=\"" + (Runtime.version().feature() + 1) + "\"", "");
+            var rejected = f.knit("compile");
+            assert rejected.exit() == 2 && rejected.output().contains("Project requires JDK") : "A project requiring a newer JDK must fail clearly";
+            assert java.util.Arrays.equals(bytes, Files.readAllBytes(f.root().resolve("out/example.app/example/Main.class"))) : "A failed prerequisite check must preserve prior output";
+        }
+    }
+}
+
+record DefaultLint() implements TestCase {
+    @Override public void run(TestTrail trail) throws Exception {
+        try (var f = Fixture.create()) {
+            f.app("", "Old.value();");
+            f.write("src/example.app/example/Old.java", "package example; @Deprecated class Old { static void value() {} }");
+            var result = f.knit("compile"); trail.note(result.output());
+            assert result.exit() == 0 && result.output().contains("warning [compiler.warn.") : "No configuration must enable lint without treating warnings as errors";
+            f.config("lint=\"none\"", "");
+            assert f.knit("compile").exit() == 0 : "The explicit lint override remains supported";
+        }
+    }
+}
+
+record AnonymousDependencies() implements TestCase {
+    @Override public void run(TestTrail trail) throws Exception {
+        try (var f = Fixture.create()) {
+            f.app("requires example.dep;", "");
+            var jar = f.jar(Map.of("module-info.java", "module example.dep {}"), "1", "25");
+            String declaration = f.dependency(jar, "example.dep", "https://invalid.example/unused", true)
+                    .replace("module=\"example.dep\" ", "").replace("kind=\"source\" ", "");
+            f.write("knit.xml", "<knit version=\"1\">" + declaration + "</knit>");
+            var result = f.knit("compile"); trail.note(result.output());
+            assert result.exit() == 0 : "URL and digest must suffice to identify a source dependency";
+            f.write("knit.xml", "<knit version=\"1\">" + declaration + declaration + "</knit>");
+            var duplicate = f.knit("compile");
+            assert duplicate.exit() == 2 && duplicate.output().contains("Duplicate module") : "Inferred module identities must still reject collisions";
+            f.config("", declaration.replace("<dependency ", "<dependency kind=\"binary\" "));
+            var mismatch = f.knit("compile");
+            assert mismatch.exit() == 2 && mismatch.output().contains("but found source") : "An explicit artifact kind remains an assertion";
         }
     }
 }
@@ -178,7 +238,8 @@ record AutomaticBinary() implements TestCase {
         try (var f = Fixture.create()) {
             f.app("", "");
             var jar = f.jar(Map.of("x.txt", "resource"), "1", "25");
-            f.write("knit.xml", "<knit version=\"1\"><compiler><module-path path=\"" + jar.getFileName() + "\"/></compiler></knit>");
+            Files.createDirectories(f.root().resolve("lib/bin"));
+            Files.copy(jar, f.root().resolve("lib/bin/automatic.jar"));
             var result = f.knit("compile"); trail.note(result.output());
             assert result.exit() == 2 && result.output().contains("Automatic modules") : "Binary inputs must be explicit JPMS modules";
         }
@@ -221,9 +282,14 @@ record ExplicitBinary() implements TestCase {
             }
             f.app("requires example.binary;", "System.out.print(binary.Api.value());");
             String dependency = f.dependency(jar, "example.binary", "https://invalid.example/unused", true).replace("kind=\"source\"", "kind=\"binary\"");
-            f.config("", dependency);
+            f.config("", dependency.replace("module=\"example.binary\" ", "").replace("kind=\"binary\" ", ""));
             var result = f.knit("compile"); trail.note(result.output());
-            assert result.exit() == 0 : "Pinned explicit binary modules must participate in compilation";
+            assert result.exit() == 0 : "Binary module identity and kind must be inferred from the artifact";
+            Files.delete(f.root().resolve("knit.xml"));
+            Files.createDirectories(f.root().resolve("lib/bin"));
+            Files.copy(jar, f.root().resolve("lib/bin/binary.jar"));
+            assert f.knit("compile").exit() == 0 : "Conventional binary dependencies must need no configuration";
+            Files.delete(f.root().resolve("lib/bin/binary.jar"));
             f.config("", dependency.replace("example.binary", "wrong.name"));
             var mismatch = f.knit("compile");
             assert mismatch.exit() == 2 && mismatch.output().contains("artifact declares example.binary") : "Binary identity must match the declaration";
@@ -234,8 +300,8 @@ record ExplicitBinary() implements TestCase {
 record SymlinkOutput() implements TestCase {
     @Override public void run(TestTrail trail) throws Exception {
         try (var f = Fixture.create()) {
-            f.app("", ""); f.config("output=\"linked/classes\"", "");
-            Files.createSymbolicLink(f.root().resolve("linked"), f.root().resolve("src"));
+            f.app("", "");
+            Files.createSymbolicLink(f.root().resolve("out"), f.root().resolve("src"));
             var result = f.knit("compile");
             assert result.exit() == 2 : "Output must reject symlink ancestors before modifying inputs";
             assert !Files.exists(f.root().resolve("src/classes")) : "Rejected output must not create directories through a symlink";
@@ -247,8 +313,8 @@ record DuplicateSourceRoot() implements TestCase {
     @Override public void run(TestTrail trail) throws Exception {
         try (var f = Fixture.create()) {
             f.app("", "");
-            Files.createSymbolicLink(f.root().resolve("linked"), f.root().resolve("src"));
-            f.write("knit.xml", "<knit version=\"1\"><compiler><source-root path=\"src\"/><source-root path=\"linked\"/></compiler></knit>");
+            Files.createDirectories(f.root().resolve("lib"));
+            Files.createSymbolicLink(f.root().resolve("lib/src"), f.root().resolve("src"));
             var result = f.knit("compile");
             assert result.exit() == 2 && result.output().contains("Duplicate source root") : "Aliases of the same source root must be rejected";
         }
