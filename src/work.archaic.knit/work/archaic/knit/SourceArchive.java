@@ -58,7 +58,7 @@ final class SourceArchive {
         }
     }
 
-    private static boolean legalNotice(String name) {
+    static boolean legalNotice(String name) {
         if (name.startsWith("META-INF/")) name = name.substring("META-INF/".length());
         return name.matches("(?i)(LICENSE|LICENCE|NOTICE|COPYING)([.-][A-Za-z0-9_-]+)*");
     }

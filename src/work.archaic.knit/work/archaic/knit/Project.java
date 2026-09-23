@@ -16,7 +16,7 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.DefaultHandler;
 
-record Project(Path root, String lint, boolean werror, List<Dependency> dependencies) {
+record Project(Path root, int minimumJdk, String lint, boolean werror, List<Dependency> dependencies) {
     record Dependency(String module, String kind, URI url, String sha256) {
         String label() { return module.isEmpty() ? url.toString() : module; }
     }
@@ -39,7 +39,7 @@ record Project(Path root, String lint, boolean werror, List<Dependency> dependen
     static Project read(Path root) throws Exception {
         root = root.toRealPath();
         if (!Files.exists(root.resolve("knit.xml"), java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            return new Project(root, "all", false, List.of());
+            return new Project(root, 0, "all", false, List.of());
         var factory = DocumentBuilderFactory.newInstance();
         factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -62,6 +62,7 @@ record Project(Path root, String lint, boolean werror, List<Dependency> dependen
         if (!document.getTagName().equals("knit")) throw new InputFailure("Expected <knit> root");
         attributes(document, "version");
         if (!required(document, "version").equals("1")) throw new InputFailure("Unsupported knit.xml version");
+        int minimumJdk = 0;
         String lint = "all";
         boolean werror = false, compilerSeen = false;
         var dependencies = new ArrayList<Dependency>();
@@ -77,7 +78,8 @@ record Project(Path root, String lint, boolean werror, List<Dependency> dependen
                         String minimum = required(element, "minimum-jdk");
                         try {
                             if (!minimum.matches("[1-9][0-9]*")) throw new NumberFormatException();
-                            if (Integer.parseInt(minimum) > Runtime.version().feature())
+                            minimumJdk = Integer.parseInt(minimum);
+                            if (minimumJdk > Runtime.version().feature())
                                 throw new InputFailure("Project requires JDK " + minimum + "; running JDK is " + Runtime.version().feature());
                         } catch (NumberFormatException error) { throw new InputFailure("minimum-jdk must be a positive Java release number"); }
                     }
@@ -108,7 +110,7 @@ record Project(Path root, String lint, boolean werror, List<Dependency> dependen
                 default -> throw new InputFailure("Unsupported Knit setting: " + element.getTagName());
             }
         }
-        return new Project(root, lint, werror, List.copyOf(dependencies));
+        return new Project(root, minimumJdk, lint, werror, List.copyOf(dependencies));
     }
 
     static void validateUrl(URI url) throws InputFailure {

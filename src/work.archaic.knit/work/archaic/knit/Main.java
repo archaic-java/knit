@@ -24,11 +24,13 @@ public final class Main {
             return 0;
         }
         if (args.length == 1 && (args[0].equals("--help") || args[0].equals("help"))) {
-            System.out.println("Usage: knit fetch | compile | --version\nRun from the project root; knit.xml is optional. Compilation is offline.");
+            System.out.println("Usage: knit fetch | compile | package <module-name> | --version\nRun from the project root; knit.xml is optional. Compilation is offline.");
             return 0;
         }
-        if (args.length != 1 || !(args[0].equals("fetch") || args[0].equals("compile"))) {
-            error.println("Usage: knit fetch | compile | --version");
+        boolean operation = args.length == 1 && (args[0].equals("fetch") || args[0].equals("compile"));
+        boolean packaging = args.length == 2 && args[0].equals("package");
+        if (!operation && !packaging) {
+            error.println("Usage: knit fetch | compile | package <module-name> | --version");
             return 2;
         }
         var log = new CommandLog(error);
@@ -38,12 +40,20 @@ public final class Main {
             Diagnostics diagnostics = providers.getFirst().get();
             Goal fetch = diagnostics.goal("knit.fetch", log);
             Goal compile = diagnostics.goal("knit.compile", log);
-            Goal selected = args[0].equals("fetch") ? fetch : compile;
+            Goal packageModule = diagnostics.goal("knit.package", log);
+            Goal selected = switch (args[0]) {
+                case "fetch" -> fetch;
+                case "compile" -> compile;
+                default -> packageModule;
+            };
             selected.run(() -> {
                 var project = Project.read(Path.of("."));
-                var artifacts = Artifacts.userCache();
-                if (args[0].equals("fetch")) artifacts.fetch(project, error);
-                else Compilation.run(project, artifacts, error);
+                switch (args[0]) {
+                    case "fetch" -> Artifacts.userCache().fetch(project, error);
+                    case "compile" -> Compilation.run(project, Artifacts.userCache(), error);
+                    case "package" -> Packaging.run(project, args[1], error);
+                    default -> throw new AssertionError("Validated command was lost");
+                }
                 error.flush();
             });
             return 0;
