@@ -1,0 +1,6 @@
+<knit version="1">
+  <compiler release="25" lint="all" output="knit-out">
+    <source-root path="src"/>
+    <source-root path="lib/src"/>
+  </compiler>
+</knit>
