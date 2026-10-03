@@ -41,7 +41,7 @@ consuming project.
 
 To build a downloadable CLI archive after compiling and testing, run
 `sh cmd/distribute <version>`. The resulting `dist/knit-<version>.tar.gz` holds
-the launcher and modular JARs for Knit, Culpa, and the service catalog. Minau and
+the launcher and modular JARs for Knit (including signing and DNS), Culpa, and the service catalog. Minau and
 test modules are excluded. A matching `.sha256` file records the archive digest.
 CI smoke-tests the extracted archive and publishes both files
 as a workflow artifact; a `v*` tag also creates a GitHub Release with that archive.
@@ -150,7 +150,7 @@ include the selected binary JARs on your application's runtime module path.
 `compile` is offline, rechecks every declared artifact's hash, and never fetches
 missing modules. Missing artifacts explain how to run fetch; missing Java modules
 are compiler diagnostics. There is no transitive resolution, version selection,
-registry, signing, certificate trust policy, or automatic upgrade.
+registry, automatic signature trust enforcement, or automatic upgrade.
 
 ## Package a module
 
@@ -197,6 +197,45 @@ renaming an arbitrary JAR does not make it a valid Knit source archive.
 Upload the generated file wherever you publish releases. Consumers can declare its
 URL and printed digest and use the existing `fetch` and `compile` commands.
 
+## Signing and verification
+
+Configure signing in the publishing project's `knit.xml`:
+
+```xml
+<knit version="1">
+  <signing publisher="archaic.work" key-id="2026-01"
+           private-key-env="KNIT_SIGNING_KEY"/>
+</knit>
+```
+
+Set `KNIT_SIGNING_KEY` to the path of an unencrypted Ed25519 PKCS#8 DER private-key
+file. Relative paths resolve against the project root. With this declaration,
+`knit package <module>` signs before publication and reports the final signed JAR's
+SHA-256. Missing or invalid signing credentials fail packaging; no unsigned
+fallback is published. Without the declaration, packaging remains unsigned.
+`fetch` and `compile` do not load the private key.
+
+`knit sign <jar>` uses the same project configuration for an existing source or
+explicit binary modular JAR. It atomically replaces an unsigned regular file;
+already signed artifacts and symbolic links are rejected. `knit verify <jar>`
+requires no project configuration and succeeds only when current publisher trust
+is established. It distinguishes unsigned, verified, rejected, and unavailable
+results; unsuccessful verification exits with status 2.
+
+Public keys are authorized by DNSSEC-authenticated `_knit.<publisher>` TXT records.
+The Linux resolver uses trusted `busctl` on PATH and local `systemd-resolved` on
+the system bus, with DNSSEC validation enabled. It accepts only authenticated
+unicast DNS replies, rejects local synthesized/zone data, and disables aliases,
+search suffixes and stale answers. Missing services, unsupported resolver flags,
+or lookup failure never establish trust. Signing and offline compilation need
+neither service. [Signing details and format](docs/signing.md) describe key
+publication, the public API, limits and tests.
+
+The signed namespace is the actual JPMS module name. Signing and verification
+read its descriptor independently of signing metadata. Signed source archives
+remain consumable offline with existing SHA-256 dependency pinning. Neither
+`fetch` nor `compile` automatically establishes DNS publisher trust.
+
 ## Source archives
 
 One JAR contains one module: root `module-info.java`, UTF-8 `.java` files under
@@ -216,7 +255,7 @@ Compilation always uses the running JDK's language and APIs; there is no target-
 Legal notices are LICENSE, LICENCE, NOTICE, or COPYING, optionally with suffixes
 such as `.txt` or `-MIT`, at the root or directly inside META-INF. Class files,
 runtime resources, nested archives, scripts, ambiguous/duplicate entry paths, and
-unknown format versions are rejected. Resource-bearing libraries can be supplied
+unknown format versions are rejected. The two exact Knit signing entries are permitted; incomplete or malformed signing metadata is rejected without a DNS lookup. Resource-bearing libraries can be supplied
 as explicit binary modular JARs. Preview-dependent source artifacts are unsupported.
 
 Knit mounts archives through the JDK ZIP filesystem and registers their source
@@ -259,9 +298,9 @@ Compiler diagnostics and progress keep their ordinary stderr format.
 Debug details use lazy suppliers; enable them with the Java system property
 `-Dknit.debug=true` (for the launcher, `JAVA_TOOL_OPTIONS=-Dknit.debug=true`).
 No contracts or provider implementations are copied into this repository.
-The implementation is intentionally one production module.
+The CLI/packaging, signing, and DNS authorization are separate production modules.
 
 A future metadata registry can help discover catalogs, providers, URLs, and hashes.
 Accepted selections would still be explicit project inputs. Runtime launching,
-test orchestration, incremental compilation, release uploading, signatures, and registry
+test orchestration, incremental compilation, release uploading, automatic dependency signature policy, and registry
 protocols are outside this initial version.

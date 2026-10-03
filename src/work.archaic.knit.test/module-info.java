@@ -1,4 +1,5 @@
 module work.archaic.knit.test {
+    requires work.archaic.knit.signing;
     requires work.archaic.service.catalog;
     requires java.compiler;
     requires jdk.httpserver;

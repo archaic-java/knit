@@ -24,13 +24,13 @@ public final class Main implements Logging {
             return 0;
         }
         if (args.length == 1 && (args[0].equals("--help") || args[0].equals("help"))) {
-            System.out.println("Usage: knit fetch | compile | package <module-name> | --version\nRun from the project root; knit.xml is optional. Compilation is offline.");
+            System.out.println("Usage: knit fetch | compile | package <module-name> | sign <jar> | verify <jar> | --version\nRun from the project root; knit.xml is optional. Compilation is offline.");
             return 0;
         }
         boolean operation = args.length == 1 && (args[0].equals("fetch") || args[0].equals("compile"));
-        boolean packaging = args.length == 2 && args[0].equals("package");
-        if (!operation && !packaging) {
-            error.println("Usage: knit fetch | compile | package <module-name> | --version");
+        boolean artifactCommand = args.length == 2 && java.util.Set.of("package", "sign", "verify").contains(args[0]);
+        if (!operation && !artifactCommand) {
+            error.println("Usage: knit fetch | compile | package <module-name> | sign <jar> | verify <jar> | --version");
             return 2;
         }
         var output = new CommandOutput(error);
@@ -58,11 +58,22 @@ public final class Main implements Logging {
         logOnFailure("Command: " + String.join(" ", args));
         Path root = Path.of(".").toAbsolutePath().normalize();
         logOnFailure("Project: " + root);
+        if (args[0].equals("verify")) {
+            SigningCommands.verify(Path.of(args[1]), error);
+            error.flush();
+            return;
+        }
         var project = Project.read(root);
         switch (args[0]) {
             case "fetch" -> Artifacts.userCache().fetch(project, error);
             case "compile" -> new Compilation(project, Artifacts.userCache(), error).run();
             case "package" -> new Packaging(project, args[1], error).run();
+            case "sign" -> {
+                Path artifact = Path.of(args[1]);
+                SigningCommands.sign(artifact, ArtifactIdentity.read(artifact), project);
+                error.println("Signed " + artifact);
+                error.println("sha256: " + SigningCommands.hash(artifact));
+            }
             default -> throw new AssertionError("Validated command was lost");
         }
         error.flush();
@@ -74,7 +85,8 @@ public final class Main implements Logging {
             Thread.currentThread().interrupt();
             return 2;
         }
-        if (failure instanceof InputFailure || failure instanceof IOException
+        if (failure instanceof InputFailure || failure instanceof java.lang.module.FindException
+                || failure instanceof java.security.GeneralSecurityException || failure instanceof IOException
                 || failure instanceof java.nio.file.InvalidPathException) return 2;
         return 3;
     }
