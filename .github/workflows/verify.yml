@@ -14,17 +14,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: archaic-java/service-catalog
-          ref: 5265d7bb7549a5325fe39ee26b2ce1f4e4f0aeb3
+          ref: 01b46cabadd358d52d6e437045a77f1a0f304c04
           path: service-catalog
       - uses: actions/checkout@v4
         with:
-          repository: archaic-java/peep
-          ref: b97658043f3eead9f62569c16b650432c45aaee5
-          path: peep
+          repository: archaic-java/culpa
+          ref: 29dd85509112da847b65ab41de38a833324f59a9
+          path: culpa
       - uses: actions/checkout@v4
         with:
           repository: archaic-java/minau
-          ref: 7abc609a7092dc6491d9af299499cfe434ad7f23
+          ref: 93bb952390b412fbaa38b2805bcf954fb6b5bd82
           path: minau
       - uses: actions/setup-java@v4
         with:
@@ -48,6 +48,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/knit-smoke"
           tar -xzf dist/knit-*.tar.gz -C "$RUNNER_TEMP/knit-smoke"
           (cd "$RUNNER_TEMP" && "$RUNNER_TEMP/knit-smoke/knit/bin/knit" --version)
+          mkdir -p "$RUNNER_TEMP/knit-project/src/example.app/example"
+          printf 'module example.app {}\n' > "$RUNNER_TEMP/knit-project/src/example.app/module-info.java"
+          printf 'package example; public class Main {}\n' > "$RUNNER_TEMP/knit-project/src/example.app/example/Main.java"
+          (cd "$RUNNER_TEMP/knit-project" && "$RUNNER_TEMP/knit-smoke/knit/bin/knit" compile)
+          (cd "$RUNNER_TEMP/knit-project" && "$RUNNER_TEMP/knit-smoke/knit/bin/knit" package example.app)
       - uses: actions/upload-artifact@v4
         with:
           name: knit-cli

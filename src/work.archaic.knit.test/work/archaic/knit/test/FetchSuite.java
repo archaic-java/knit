@@ -66,6 +66,9 @@ record AcquireArtifacts() implements TestCase {
                     fixture.config("", fixture.dependency(jar, "example.dep", base + "/" + endpoint, false));
                     var result = fixture.knit("fetch", trust); trail.note(endpoint + ": " + result.output());
                     assert result.exit() == 2 : "Failed or unsafe HTTP responses must be input/acquisition failures: " + endpoint;
+                    assert result.output().contains("work.archaic.knit.Artifacts: Requesting example.dep")
+                            && result.output().lines().filter(line -> line.startsWith("knit: ")).count() == 1
+                            : "Acquisition failures must include artifact evidence and render once";
                     try (var paths = Files.walk(fixture.cache())) {
                         assert paths.noneMatch(Files::isRegularFile) : "A failed download must leave no cache entry or temporary download";
                     }
@@ -77,6 +80,8 @@ record AcquireArtifacts() implements TestCase {
                 fixture.config("", fixture.dependency(jar, "example.dep", base + "/redirect", false));
                 var downloaded = fixture.knit("fetch", trust); trail.note(downloaded.output());
                 assert downloaded.exit() == 0 : "An HTTPS redirect to a matching artifact must be supported";
+                assert !downloaded.output().contains("Requesting example.dep")
+                        : "Successful acquisition must discard request evidence";
                 int count = requests.get();
                 assert fixture.knit("fetch", trust).exit() == 0 : "Repeated fetch must accept a valid cache entry";
                 assert count == requests.get() : "Repeated fetch must reuse the verified cache without a network request";

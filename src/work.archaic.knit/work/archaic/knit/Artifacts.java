@@ -17,7 +17,9 @@ import java.util.HexFormat;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-final class Artifacts {
+import work.archaic.service.logging.v03.Logging;
+
+final class Artifacts implements Logging {
     private final Path cache;
     Artifacts(Path cache) { this.cache = cache.toAbsolutePath().normalize(); }
     Path root() { return cache; }
@@ -35,16 +37,19 @@ final class Artifacts {
 
     Path require(Project.Dependency dependency) throws IOException, InputFailure {
         Path file = path(dependency);
+        logOnFailure("Checking cached artifact " + dependency.label() + " at " + file);
         if (!Files.isRegularFile(file)) throw new InputFailure("Missing artifact for " + dependency.label() + "; run knit fetch");
         verify(file, dependency);
         return file;
     }
 
     void fetch(Project project, PrintWriter output) throws Exception {
+        logOnFailure("Fetching " + project.dependencies().size() + " dependencies; cache " + cache);
         try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20))
                 .followRedirects(HttpClient.Redirect.NEVER).build()) {
             for (var dependency : project.dependencies()) {
                 Path target = path(dependency);
+                logOnFailure("Fetching artifact " + dependency.label());
                 if (Files.exists(target)) {
                     verify(target, dependency);
                     output.println("Verified cached " + dependency.label());
@@ -54,6 +59,7 @@ final class Artifacts {
                 Path temporary = Files.createTempFile(target.getParent(), ".download-", ".tmp");
                 try {
                     download(client, dependency, temporary);
+                    logOnFailure("Publishing verified artifact " + dependency.label() + " to " + target);
                     // Same digest means concurrent publishers must publish identical bytes.
                     Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
                     output.println("Fetched " + dependency.label());
@@ -64,14 +70,16 @@ final class Artifacts {
     }
 
     @SuppressWarnings("try") // Closing a stalled HTTP body is the timeout mechanism.
-    private static void download(HttpClient client, Project.Dependency dependency, Path target) throws Exception {
+    private void download(HttpClient client, Project.Dependency dependency, Path target) throws Exception {
         URI url = dependency.url();
         for (int redirects = 0; redirects <= 5; redirects++) {
             Project.validateUrl(url);
             var request = HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(30)).GET().build();
+            logOnFailure("Requesting " + dependency.label() + " from " + url.getHost());
             var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (var body = response.body()) {
                 int status = response.statusCode();
+                logOnFailure("HTTP " + status + " for " + dependency.label());
                 if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
                     if (redirects == 5) throw new InputFailure("Too many redirects for " + dependency.label());
                     String location = response.headers().firstValue("Location")
