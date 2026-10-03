@@ -7,13 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.DigestOutputStream;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeMap;
@@ -68,9 +65,7 @@ final class Packaging implements Logging {
             // The existing archive format requires a minimum even when the project omits one.
             int minimum = project.minimumJdk() == 0 ? Runtime.version().feature() : project.minimumJdk();
             attributes.putValue("Archaic-Minimum-JDK", Integer.toString(minimum));
-            var digest = MessageDigest.getInstance("SHA-256");
-            try (var bytes = new DigestOutputStream(Files.newOutputStream(temporary), digest);
-                    var jar = new JarOutputStream(bytes)) {
+            try (var jar = new JarOutputStream(Files.newOutputStream(temporary))) {
                 jar.putNextEntry(entry("META-INF/MANIFEST.MF"));
                 manifest.write(jar);
                 jar.closeEntry();
@@ -82,7 +77,11 @@ final class Packaging implements Logging {
             }
             logOnFailure("Validating completed archive for " + module);
             SourceArchive.validate(temporary);
-            String hash = HexFormat.of().formatHex(digest.digest());
+            if (project.signing() != null) {
+                SigningCommands.sign(temporary, module, project);
+                SourceArchive.validate(temporary);
+            }
+            String hash = SigningCommands.hash(temporary);
             logOnFailure("Publishing source archive " + target);
             Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             output.println("Packaged " + project.root().relativize(target));

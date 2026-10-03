@@ -11,6 +11,8 @@ minimum-jdk, lint policy, and exact artifacts; no target-release or layout setti
 
 Source links live in `lib/src`. Generated `out/` and `dist/` are ignored.
 Logging v03/Culpa binds one configured context per command on the calling thread.
+Signing and DNS have separate production/test modules; run all suites via cmd/test.
+Signing APIs take explicit values; keep XML and private-key environment access in the CLI module.
 Operational objects implement Logging; debug messages use suppliers. Tests use Minau v02,
 inline `assert condition : "violated expectation"`, and `-ea`; no assertion helpers.
 Do not alter catalog contracts or add transitive dependency resolution.

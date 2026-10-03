@@ -67,6 +67,9 @@ record Fixture(Path root, Path cache) implements AutoCloseable {
         return root.resolve(line.substring("Packaged ".length()));
     }
     Result knitCommand(java.util.List<String> command, String... properties) throws Exception {
+        return knitEnvironment(command, Map.of(), properties);
+    }
+    Result knitEnvironment(java.util.List<String> command, Map<String, String> environment, String... properties) throws Exception {
         var args = new java.util.ArrayList<String>();
         args.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         args.add("-Xshare:off");
@@ -75,6 +78,7 @@ record Fixture(Path root, Path cache) implements AutoCloseable {
         args.addAll(command);
         var builder = new ProcessBuilder(args).directory(root.toFile());
         builder.environment().put("KNIT_CACHE", cache.toString());
+        builder.environment().putAll(environment);
         return execute(builder);
     }
     Result launch(String entry) throws Exception {

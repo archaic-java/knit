@@ -17,7 +17,7 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 mkdir -p "$stage/knit/bin" "$stage/knit/modules"
 cp bin/knit "$stage/knit/bin/knit"
 
-for module in work.archaic.knit work.archaic.culpa work.archaic.service.catalog; do
+for module in work.archaic.knit work.archaic.knit.signing work.archaic.knit.dns work.archaic.culpa work.archaic.service.catalog; do
     if [ ! -f "out/$module/module-info.class" ]; then
         echo "Missing compiled module $module; run javac @cmd/compile first" >&2
         exit 2

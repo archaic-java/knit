@@ -16,7 +16,8 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.DefaultHandler;
 
-record Project(Path root, int minimumJdk, String lint, boolean werror, List<Dependency> dependencies) {
+record Project(Path root, int minimumJdk, String lint, boolean werror, List<Dependency> dependencies, SigningSettings signing) {
+    record SigningSettings(String publisher, String keyId, String privateKeyEnv) {}
     record Dependency(String module, String kind, URI url, String sha256) {
         String label() { return module.isEmpty() ? url.toString() : module; }
     }
@@ -39,7 +40,7 @@ record Project(Path root, int minimumJdk, String lint, boolean werror, List<Depe
     static Project read(Path root) throws Exception {
         root = root.toRealPath();
         if (!Files.exists(root.resolve("knit.xml"), java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            return new Project(root, 0, "all", false, List.of());
+            return new Project(root, 0, "all", false, List.of(), null);
         var factory = DocumentBuilderFactory.newInstance();
         factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -65,6 +66,7 @@ record Project(Path root, int minimumJdk, String lint, boolean werror, List<Depe
         int minimumJdk = 0;
         String lint = "all";
         boolean werror = false, compilerSeen = false;
+        SigningSettings signing = null;
         var dependencies = new ArrayList<Dependency>();
         var names = new HashSet<String>();
         for (var element : children(document)) {
@@ -91,6 +93,20 @@ record Project(Path root, int minimumJdk, String lint, boolean werror, List<Depe
                         throw new InputFailure("werror must be true or false");
                     werror = warning.equals("true");
                 }
+                case "signing" -> {
+                    if (signing != null) throw new InputFailure("Duplicate <signing>");
+                    attributes(element, "publisher", "key-id", "private-key-env");
+                    leaf(element);
+                    String publisher = required(element, "publisher");
+                    String keyId = required(element, "key-id");
+                    String environment = required(element, "private-key-env");
+                    if (!environment.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new InputFailure("Invalid private-key-env name");
+                    var labels = publisher.split("\\.");
+                    java.util.Collections.reverse(java.util.Arrays.asList(labels));
+                    try { new work.archaic.knit.signing.Metadata(String.join(".", labels), publisher, keyId); }
+                    catch (IllegalArgumentException error) { throw new InputFailure(error.getMessage()); }
+                    signing = new SigningSettings(publisher, keyId, environment);
+                }
                 case "dependency" -> {
                     attributes(element, "module", "kind", "url", "sha256");
                     leaf(element);
@@ -110,7 +126,7 @@ record Project(Path root, int minimumJdk, String lint, boolean werror, List<Depe
                 default -> throw new InputFailure("Unsupported Knit setting: " + element.getTagName());
             }
         }
-        return new Project(root, minimumJdk, lint, werror, List.copyOf(dependencies));
+        return new Project(root, minimumJdk, lint, werror, List.copyOf(dependencies), signing);
     }
 
     static void validateUrl(URI url) throws InputFailure {

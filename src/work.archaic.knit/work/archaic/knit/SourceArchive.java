@@ -19,6 +19,8 @@ final class SourceArchive {
 
     static void validate(Path path) throws IOException, InputFailure {
         try (var jar = new JarFile(path.toFile(), false)) {
+            if (jar.getJarEntry("META-INF/KNIT/metadata") != null || jar.getJarEntry("META-INF/KNIT/signature") != null)
+                work.archaic.knit.signing.Signing.inspect(path);
             var manifest = jar.getManifest();
             if (manifest == null) throw new InputFailure("Source JAR has no manifest: " + path);
             var attributes = manifest.getMainAttributes();
@@ -43,11 +45,17 @@ final class SourceArchive {
                         || java.util.Arrays.stream(clean.split("/", -1)).anyMatch(s -> s.isEmpty() || s.equals(".") || s.equals("..")))
                     throw new InputFailure("Ambiguous archive entry: " + name);
                 if (!names.add(clean)) throw new InputFailure("Duplicate archive entry: " + name);
-                if (entry.isDirectory()) continue;
+                if (entry.isDirectory()) {
+                    try (var input = jar.getInputStream(entry)) {
+                        if (entry.getSize() != 0 || input.read() != -1) throw new InputFailure("Directory entry contains payload: " + name);
+                    }
+                    continue;
+                }
                 files.add(clean);
                 descriptor |= name.equals("module-info.java");
                 if (!(name.endsWith(".java") && !name.startsWith("META-INF/"))
-                        && !name.equals("META-INF/MANIFEST.MF") && !legalNotice(name))
+                        && !name.equals("META-INF/MANIFEST.MF") && !name.equals("META-INF/KNIT/metadata")
+                        && !name.equals("META-INF/KNIT/signature") && !legalNotice(name))
                     throw new InputFailure("Unsupported source JAR payload: " + name);
             }
             for (String name : names) {
