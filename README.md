@@ -16,11 +16,11 @@ pinned dependency checkouts beside this repository (CI uses the same revisions):
 
 ```sh
 git clone https://github.com/archaic-java/service-catalog.git ../service-catalog
-git -C ../service-catalog checkout --detach 5265d7bb7549a5325fe39ee26b2ce1f4e4f0aeb3
-git clone https://github.com/archaic-java/peep.git ../peep
-git -C ../peep checkout --detach b97658043f3eead9f62569c16b650432c45aaee5
+git -C ../service-catalog checkout --detach 01b46cabadd358d52d6e437045a77f1a0f304c04
+git clone https://github.com/archaic-java/culpa.git ../culpa
+git -C ../culpa checkout --detach 29dd85509112da847b65ab41de38a833324f59a9
 git clone https://github.com/archaic-java/minau.git ../minau
-git -C ../minau checkout --detach 7abc609a7092dc6491d9af299499cfe434ad7f23
+git -C ../minau checkout --detach 93bb952390b412fbaa38b2805bcf954fb6b5bd82
 javac @cmd/compile
 java @cmd/test
 bin/knit --version
@@ -29,8 +29,9 @@ bin/knit --version
 For existing sibling checkouts, verify their revisions and preserve any local work
 before changing versions. The checked-in `lib/src` links point to these modules.
 Use `java` and `javac` from the same JDK. No Maven, Gradle, or classpath is used.
-Peep supplies logging v02 Diagnostics; Minau supplies the test runner. There are
-two existing serialVersionUID warnings in the pinned catalog with all lint checks.
+Culpa supplies logging v03 contexts; Minau supplies the test runner. The pinned
+dependency modules currently emit serial and exported-API warnings when compiling
+with all lint checks.
 
 `bin/knit` finds its compiled installation relative to the script and invokes
 `java` on PATH. Put this repository's `bin` directory on PATH. Do not move or
@@ -40,7 +41,7 @@ consuming project.
 
 To build a downloadable CLI archive after compiling and testing, run
 `sh cmd/distribute <version>`. The resulting `dist/knit-<version>.tar.gz` holds
-the launcher and modular JARs for Knit, Peep, and the service catalog. Minau and
+the launcher and modular JARs for Knit, Culpa, and the service catalog. Minau and
 test modules are excluded. A matching `.sha256` file records the archive digest.
 CI smoke-tests the extracted archive and publishes both files
 as a workflow artifact; a `v*` tag also creates a GitHub Release with that archive.
@@ -250,9 +251,15 @@ stale classes, HTTPS acquisition through a local TLS server, and packaging/consu
 external network access; `keytool` creates an ephemeral test certificate.
 
 Knit's bootstrap uses plain JDK commands. Compilation itself uses the public
-JavaCompiler and JavacTask tree APIs, with no compiler internals. Fetch, compile, and package
-are distinct logging v02 Goals. No contracts or provider implementations are copied
-into this repository. The implementation is intentionally one production module.
+JavaCompiler and JavacTask tree APIs, with no compiler internals. Each fetch,
+compile, or package command runs in one configured logging v03 context on the
+calling thread. Operational objects
+record bounded evidence which is discarded on success and printed once on failure.
+Compiler diagnostics and progress keep their ordinary stderr format.
+Debug details use lazy suppliers; enable them with the Java system property
+`-Dknit.debug=true` (for the launcher, `JAVA_TOOL_OPTIONS=-Dknit.debug=true`).
+No contracts or provider implementations are copied into this repository.
+The implementation is intentionally one production module.
 
 A future metadata registry can help discover catalogs, providers, URLs, and hashes.
 Accepted selections would still be explicit project inputs. Runtime launching,

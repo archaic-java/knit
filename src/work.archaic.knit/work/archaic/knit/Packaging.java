@@ -23,18 +23,31 @@ import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import javax.tools.ToolProvider;
 
+import work.archaic.service.logging.v03.Logging;
+
 /** Creates one source distribution without compiling or resolving its dependencies. */
-final class Packaging {
+final class Packaging implements Logging {
     // Stay away from the ZIP epoch boundary, which triggers timezone-dependent extended timestamps.
     private static final LocalDateTime ARCHIVE_TIME = LocalDateTime.of(2000, 1, 1, 0, 0);
     private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyMMdd-HHmm", Locale.ROOT).withZone(ZoneOffset.UTC);
-    private Packaging() {}
+    private final Project project;
+    private final String module;
+    private final PrintWriter output;
 
-    static void run(Project project, String module, PrintWriter output) throws Exception {
+    Packaging(Project project, String module, PrintWriter output) {
+        this.project = project;
+        this.module = module;
+        this.output = output;
+    }
+
+    void run() throws Exception {
+        logOnFailure("Packaging source module " + module);
         Project.moduleName(module);
         Path source = source(project, module);
+        logOnFailure("Validating module descriptor at " + source);
         validateDescriptor(project, module, source, output);
         var payload = payload(project.root(), source);
+        logOnDebug(() -> "Package entries: " + String.join(", ", payload.keySet()));
         Path dist = project.root().resolve("dist");
         if (Files.isSymbolicLink(dist) || (Files.exists(dist) && !Files.isDirectory(dist)))
             throw new InputFailure("dist must be a regular directory, not a file or symbolic link");
@@ -45,6 +58,7 @@ final class Packaging {
         Path target = dist.resolve(module + "-" + FILE_TIME.format(Instant.now()) + ".knit.jar");
         if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS))
             throw new InputFailure("Package output must be a regular file: " + target);
+        logOnFailure("Writing " + payload.size() + " entries to " + target);
         Path temporary = Files.createTempFile(dist, ".knit-package-", ".tmp");
         try {
             var manifest = new Manifest();
@@ -66,8 +80,10 @@ final class Packaging {
                     jar.closeEntry();
                 }
             }
+            logOnFailure("Validating completed archive for " + module);
             SourceArchive.validate(temporary);
             String hash = HexFormat.of().formatHex(digest.digest());
+            logOnFailure("Publishing source archive " + target);
             Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             output.println("Packaged " + project.root().relativize(target));
             output.println("sha256: " + hash);

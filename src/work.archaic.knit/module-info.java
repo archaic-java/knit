@@ -6,5 +6,5 @@ module work.archaic.knit {
     requires java.net.http;
     requires java.xml;
     requires work.archaic.service.catalog;
-    uses work.archaic.service.logging.v02.Diagnostics;
+    uses work.archaic.service.logging.v03.Log;
 }

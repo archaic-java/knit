@@ -4,13 +4,13 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.util.ServiceLoader;
-import work.archaic.service.logging.v02.Diagnostics;
-import work.archaic.service.logging.v02.FailureReport;
-import work.archaic.service.logging.v02.Goal;
-import work.archaic.service.logging.v02.Log;
+import work.archaic.service.logging.v03.Configuration;
+import work.archaic.service.logging.v03.Context;
+import work.archaic.service.logging.v03.Log;
+import work.archaic.service.logging.v03.Logging;
 
 /** Command-line entry point; all paths are relative to the invoking project. */
-public final class Main {
+public final class Main implements Logging {
     private Main() {}
 
     public static void main(String[] args) {
@@ -33,60 +33,49 @@ public final class Main {
             error.println("Usage: knit fetch | compile | package <module-name> | --version");
             return 2;
         }
-        var log = new CommandLog(error);
+        var output = new CommandOutput(error);
+        Context context;
         try {
-            var providers = ServiceLoader.load(Diagnostics.class).stream().toList();
-            if (providers.size() != 1) throw new InputFailure("Expected exactly one Diagnostics provider; install Peep on Knit's module path");
-            Diagnostics diagnostics = providers.getFirst().get();
-            Goal fetch = diagnostics.goal("knit.fetch", log);
-            Goal compile = diagnostics.goal("knit.compile", log);
-            Goal packageModule = diagnostics.goal("knit.package", log);
-            Goal selected = switch (args[0]) {
-                case "fetch" -> fetch;
-                case "compile" -> compile;
-                default -> packageModule;
-            };
-            selected.run(() -> {
-                var project = Project.read(Path.of("."));
-                switch (args[0]) {
-                    case "fetch" -> Artifacts.userCache().fetch(project, error);
-                    case "compile" -> Compilation.run(project, Artifacts.userCache(), error);
-                    case "package" -> Packaging.run(project, args[1], error);
-                    default -> throw new AssertionError("Validated command was lost");
-                }
-                error.flush();
-            });
-            return 0;
-        } catch (CompilationFailure failure) {
-            log.reportIfNeeded(failure);
-            return 1;
-        } catch (InputFailure | IOException | java.nio.file.InvalidPathException failure) {
-            log.reportIfNeeded(failure);
-            return 2;
-        } catch (InterruptedException failure) {
-            log.reportIfNeeded(failure);
-            Thread.currentThread().interrupt();
-            return 2;
+            var providers = ServiceLoader.load(Log.class).stream().toList();
+            if (providers.size() != 1) throw new InputFailure("Expected exactly one Log provider; install Culpa on Knit's module path");
+            var configuration = new Configuration(Boolean.getBoolean("knit.debug"), output::entry, output::failure);
+            context = providers.getFirst().get().context(configuration);
         } catch (Exception | java.util.ServiceConfigurationError failure) {
-            log.reportIfNeeded(failure);
-            return 3;
+            // No context exists yet to render a composition failure.
+            output.problem(failure);
+            return status(failure);
+        }
+        try {
+            context.run(() -> new Main().execute(args, error));
+            return 0;
+        } catch (Exception | Error failure) {
+            // Context completion has already published this failure and its evidence.
+            return status(failure);
         }
     }
 
-    private static final class CommandLog implements Log {
-        private final PrintWriter destination;
-        private boolean reported;
-        CommandLog(PrintWriter destination) { this.destination = destination; }
-        @Override public void write(String message) { destination.println(message); }
-        @Override public void write(FailureReport report) { reportIfNeeded(report.failure()); }
-        void reportIfNeeded(Throwable failure) {
-            if (reported) return;
-            reported = true;
-            destination.println("knit: " + (failure.getMessage() == null ? failure : failure.getMessage()));
-            if (!(failure instanceof InputFailure || failure instanceof IOException || failure instanceof CompilationFailure
-                    || failure instanceof InterruptedException || failure instanceof java.nio.file.InvalidPathException))
-                failure.printStackTrace(destination);
-            destination.flush();
+    private void execute(String[] args, PrintWriter error) throws Exception {
+        logOnFailure("Command: " + String.join(" ", args));
+        Path root = Path.of(".").toAbsolutePath().normalize();
+        logOnFailure("Project: " + root);
+        var project = Project.read(root);
+        switch (args[0]) {
+            case "fetch" -> Artifacts.userCache().fetch(project, error);
+            case "compile" -> new Compilation(project, Artifacts.userCache(), error).run();
+            case "package" -> new Packaging(project, args[1], error).run();
+            default -> throw new AssertionError("Validated command was lost");
         }
+        error.flush();
+    }
+
+    private static int status(Throwable failure) {
+        if (failure instanceof CompilationFailure) return 1;
+        if (failure instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+            return 2;
+        }
+        if (failure instanceof InputFailure || failure instanceof IOException
+                || failure instanceof java.nio.file.InvalidPathException) return 2;
+        return 3;
     }
 }

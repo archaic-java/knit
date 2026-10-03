@@ -18,19 +18,30 @@ import java.util.List;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
-final class Compilation {
-    private Compilation() {}
+import work.archaic.service.logging.v03.Logging;
 
-    static void run(Project project, Artifacts artifacts, PrintWriter output) throws Exception {
+final class Compilation implements Logging {
+    private final Project project;
+    private final Artifacts artifacts;
+    private final PrintWriter output;
+
+    Compilation(Project project, Artifacts artifacts, PrintWriter output) {
+        this.project = project;
+        this.artifacts = artifacts;
+        this.output = output;
+    }
+
+    void run() throws Exception {
+        logOnFailure("Acquiring compilation lock for " + project.root());
         try (var channel = FileChannel.open(project.root().resolve(".knit-compile.lock"),
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 var lock = channel.tryLock()) {
             if (lock == null) throw new InputFailure("Another Knit compilation owns this project");
-            compile(project, artifacts, output);
+            compile();
         }
     }
 
-    private static void compile(Project project, Artifacts artifacts, PrintWriter output) throws Exception {
+    private void compile() throws Exception {
         var compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) throw new InputFailure("Knit requires a full JDK with its Java compiler");
         var messages = new Messages(output, project.root());
@@ -43,6 +54,7 @@ final class Compilation {
         try (var files = compiler.getStandardFileManager(messages, java.util.Locale.ROOT, java.nio.charset.StandardCharsets.UTF_8)) {
             var sourcePaths = new HashSet<Path>();
             for (Path root : project.sourceRoots()) {
+                logOnFailure("Scanning source root " + root);
                 if (!Files.isDirectory(root)) throw new InputFailure("Missing source root: " + root);
                 root = root.toRealPath();
                 if (!sourcePaths.add(root)) throw new InputFailure("Duplicate source root: " + root);
@@ -62,6 +74,7 @@ final class Compilation {
             }
             var binaryLocations = new HashSet<Path>();
             for (Path path : project.modulePaths()) {
+                logOnFailure("Inspecting binary module path " + path);
                 if (!Files.exists(path)) throw new InputFailure("Missing module path: " + path);
                 path = path.toRealPath();
                 protectedPaths.add(path);
@@ -75,11 +88,13 @@ final class Compilation {
                 } else addBinary(path, null, binaryNames, binaryPaths, binaryLocations);
             }
             for (var dependency : project.dependencies()) {
+                logOnFailure("Resolving dependency " + dependency.label());
                 Path jar = artifacts.require(dependency);
                 protectedPaths.add(jar);
                 String kind = SourceArchive.kind(jar);
                 if (!dependency.kind().isEmpty() && !dependency.kind().equals(kind))
                     throw new InputFailure("Expected " + dependency.kind() + " artifact for " + dependency.label() + " but found " + kind);
+                logOnFailure("Using " + kind + " dependency " + dependency.label());
                 if (kind.equals("binary")) {
                     addBinary(jar, dependency.module().isEmpty() ? null : dependency.module(), binaryNames, binaryPaths, binaryLocations);
                 } else {
@@ -105,6 +120,7 @@ final class Compilation {
                     throw new InputFailure("Module descriptor does not match expected module " + entry.getKey());
             }
             if (messages.hasErrors()) throw new CompilationFailure();
+            logOnDebug(() -> "Source modules: " + String.join(", ", sourceModules.keySet()));
             for (var entry : sourceModules.entrySet())
                 files.setLocationForModule(StandardLocation.MODULE_SOURCE_PATH, entry.getKey(), List.of(entry.getValue()));
             files.setLocationFromPaths(StandardLocation.MODULE_PATH, binaryPaths);
@@ -114,9 +130,11 @@ final class Compilation {
                         "--module", String.join(",", sourceModules.keySet())));
                 if (!project.lint().isEmpty()) options.add("-Xlint:" + project.lint());
                 if (project.werror()) options.add("-Werror");
+                logOnFailure("Compiling " + sourceModules.size() + " source modules; output " + project.output());
                 boolean success = compiler.getTask(output, files, messages, options, null, null).call();
                 output.println(messages.summary());
                 if (!success) throw new CompilationFailure();
+                logOnFailure("Publishing compiled output to " + project.output());
                 destination.publish();
                 output.println("Compiled to " + project.root().relativize(project.output()));
             }
