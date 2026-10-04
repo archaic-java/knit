@@ -14,10 +14,22 @@ import work.archaic.knit.signing.Metadata;
 /** Uses trusted busctl and systemd-resolved on the system bus; never trusts a remote DNS AD bit. */
 public final class SystemdResolver implements AuthorizationResolver {
     private final String executable;
+    /** Use trusted busctl on PATH and local systemd-resolved on the system bus.
+     * The resolver must support the requested flags and be configured for DNSSEC validation.
+     */
     public SystemdResolver() { executable = "busctl"; }
-    /** Select an explicitly trusted busctl executable, including a test fixture executable. */
+    /** Select an explicitly trusted busctl executable, including an isolated test fixture.
+     * @param executable trusted executable path, made absolute at construction
+     */
     public SystemdResolver(Path executable) { this.executable = executable.toAbsolutePath().toString(); }
 
+    /** Resolve through the local system bus with a 25-second process deadline.
+     * Responses are limited to 1 MiB and 4096 records. Authentication requires validated,
+     * unicast DNS data excluding synthetic/local-zone origins; no aliases, search suffixes
+     * or stale answers are requested. Inherited remote-bus selection is removed.
+     * @throws IOException for invalid domains, unavailable services, failed lookup or malformed replies
+     * @throws InterruptedException if the calling thread is interrupted
+     */
     @Override public Authorization resolve(String publisher) throws IOException, InterruptedException {
         // Reuse canonical publisher checks before constructing a resolver query.
         try {

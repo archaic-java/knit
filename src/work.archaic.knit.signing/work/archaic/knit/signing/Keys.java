@@ -13,6 +13,11 @@ import java.util.Arrays;
 /** Raw RFC 8032 Ed25519 public-key encoding used in DNS. */
 public final class Keys {
     private Keys() {}
+    /** Encode an Ed25519 public key as a fresh 32-byte RFC 8032 compressed point.
+     * @param key Ed25519 public key
+     * @return raw public-key bytes for DNS publication
+     * @throws SigningException if the key is not an Ed25519 public key
+     */
     public static byte[] encode(PublicKey key) throws SigningException {
         if (!(key instanceof EdECPublicKey ed) || !ed.getParams().getName().equals("Ed25519"))
             throw new SigningException("Expected an Ed25519 public key");
@@ -22,6 +27,11 @@ public final class Keys {
         if (ed.getPoint().isXOdd()) raw[31] |= (byte) 128;
         return raw;
     }
+    /** Decode canonical raw RFC 8032 public-key bytes; performs no DNS authorization.
+     * @param raw exactly 32 bytes, not modified by this method
+     * @return Ed25519 public key
+     * @throws SigningException if length, point encoding or JDK key construction is invalid
+     */
     public static PublicKey decode(byte[] raw) throws SigningException {
         if (raw.length != 32) throw new SigningException("Ed25519 public key must contain 32 bytes");
         byte[] big = raw.clone();

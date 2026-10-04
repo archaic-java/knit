@@ -25,7 +25,8 @@ final class CommandOutput {
     void problem(Throwable failure) {
         destination.println("knit: " + escape(failure.getMessage() == null ? failure.toString() : failure.getMessage()));
         if (!(failure instanceof InputFailure || failure instanceof IOException || failure instanceof CompilationFailure
-                || failure instanceof InterruptedException || failure instanceof java.nio.file.InvalidPathException))
+                || failure instanceof InterruptedException || failure instanceof java.nio.file.InvalidPathException
+                || failure instanceof java.security.GeneralSecurityException || failure instanceof java.lang.module.FindException))
             failure.printStackTrace(destination);
         destination.flush();
     }

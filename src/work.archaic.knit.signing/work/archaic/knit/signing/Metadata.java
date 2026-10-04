@@ -3,8 +3,17 @@ package work.archaic.knit.signing;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-/** Signed identity. The caller must establish namespace from the actual module descriptor. */
+/** Signed identity; the caller establishes namespace from the actual module descriptor.
+ * @param namespace Java identifier components without ignorable characters, at most
+ *     3000 UTF-8 bytes; equal to reversed publisher labels or a dotted descendant
+ * @param publisher lowercase ASCII DNS domain, at least two labels, no trailing dot,
+ *     at most 247 characters; domain hyphens are not translated into Java identifiers
+ * @param keyId case-sensitive identifier matching {@code [A-Za-z0-9._-]{1,64}}
+ */
 public record Metadata(String namespace, String publisher, String keyId) {
+    /** Validate identity syntax and publisher ownership.
+     * @throws IllegalArgumentException if any component is null or violates the identity rules
+     */
     public Metadata {
         if (namespace == null || !namespace.matches("[\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*(\\.[\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*)*"))
             throw new IllegalArgumentException("Invalid signing namespace");
