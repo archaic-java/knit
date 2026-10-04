@@ -20,7 +20,15 @@ import static work.archaic.knit.signing.Verification.Status.*;
 public final class Signing {
     private Signing() {}
 
-    /** Atomically replaces an unsigned regular JAR. Caller establishes metadata.namespace from its descriptor. */
+    /** Atomically replace an unsigned regular JAR with its signed form.
+     * The caller establishes metadata.namespace from the descriptor and must not concurrently
+     * edit or replace the artifact. Failure preserves the original and removes temporary files.
+     * @param artifact unsigned regular JAR, not a symbolic link
+     * @param metadata descriptor-derived identity and publisher/key selection
+     * @param key Ed25519 private key; signing is offline and does not check DNS key state
+     * @throws IOException for invalid/already signed artifacts, exceeded limits or publication failure
+     * @throws GeneralSecurityException if signing cannot be performed with the supplied key
+     */
     public static void sign(Path artifact, Metadata metadata, PrivateKey key) throws IOException, GeneralSecurityException {
         artifact = artifact.toAbsolutePath();
         if (!Files.isRegularFile(artifact, LinkOption.NOFOLLOW_LINKS)) throw new SigningException("Signing requires a regular JAR, not a symbolic link");
@@ -44,12 +52,23 @@ public final class Signing {
         } finally { Files.deleteIfExists(staged); if (completed != null) Files.deleteIfExists(completed); }
     }
 
-    /** Validates structure and metadata without DNS or cryptographic trust. Returns null only when both entries are absent. */
+    /** Validate structure and metadata without DNS or cryptographic trust.
+     * @param artifact JAR to inspect
+     * @return metadata, or null only when both signing entries are absent
+     * @throws IOException for unreadable or structurally invalid archives/signing entries
+     */
     public static Metadata inspect(Path artifact) throws IOException {
         try (var jar = new JarFile(artifact.toFile(), false)) { JarContents.entries(jar); return inspect(jar); }
     }
 
-    /** Cryptographic check only. Caller must derive expectedModule from the artifact's actual descriptor. */
+    /** Check cryptographic integrity without establishing publisher authorization.
+     * @param artifact signed JAR
+     * @param expectedModule name derived independently from the actual module descriptor
+     * @param key public key to check; no DNS authorization is inferred
+     * @return whether the signature validates against this key
+     * @throws IOException for unreadable, unsigned, malformed or identity-mismatched artifacts
+     * @throws GeneralSecurityException if cryptographic checking cannot be performed
+     */
     public static boolean check(Path artifact, String expectedModule, PublicKey key) throws IOException, GeneralSecurityException {
         try (var jar = new JarFile(artifact.toFile(), false)) {
             JarContents.entries(jar);
@@ -60,7 +79,15 @@ public final class Signing {
         }
     }
 
-    /** Establishes current publisher trust. Resolver must authenticate DNSSEC; caller establishes expectedModule. */
+    /** Establish current publisher trust using the artifact's semantic signature.
+     * The caller derives expectedModule independently from the actual descriptor.
+     * No historical authorization, artifact safety or dependency graph trust is established.
+     * @param artifact JAR to inspect, bounded to 128 MiB uncompressed contents and 100000 entries
+     * @param expectedModule actual JPMS module name
+     * @param resolver trusted DNSSEC validator supplying the complete authorization RRset
+     * @return unsigned, verified, rejected or unavailable outcome; only VERIFIED establishes trust
+     * @throws InterruptedException if authorization lookup is interrupted
+     */
     public static Verification verify(Path artifact, String expectedModule, AuthorizationResolver resolver) throws InterruptedException {
         Metadata metadata = null;
         try (var jar = new JarFile(artifact.toFile(), false)) {

@@ -18,6 +18,9 @@ public record LoggingSuite() implements TestSuite {
         cases.add(new InvalidProjectLogging());
         cases.add(new MissingLoggingProvider());
         cases.add(new BrokenLoggingProvider());
+        cases.add(new CliOutputChannels("--help"));
+        cases.add(new CliOutputChannels("--version"));
+        cases.add(new SigningErrorLogging());
     }
 }
 
@@ -26,7 +29,8 @@ record SuccessfulLogging(boolean debug) implements TestCase {
         try (var f = Fixture.create()) {
             f.app("", "System.out.print(\"ok\");");
             var result = f.knit("compile", "-Dknit.debug=" + debug);
-            trail.note(result.output());
+            trail.note(result.stderr());
+            assert result.stdout().isEmpty() : "Compilation progress and debug output must stay off stdout";
             assert result.exit() == 0 : "Logging configuration must preserve successful compilation";
             assert result.output().contains("Compiled to out") : "Normal progress must keep its CLI format";
             assert !result.output().contains("Command: compile") && !result.output().contains("Acquiring compilation lock")
@@ -43,6 +47,7 @@ record FailedCompilationLogging() implements TestCase {
             f.app("", "missing();");
             var result = f.knit("compile");
             trail.note(result.output());
+            assert result.stdout().isEmpty() : "Compiler diagnostics and failure evidence must use stderr";
             assert result.exit() == 1 : "Compiler failures must preserve exit status 1";
             assert result.output().contains("Main.java:1:") && result.output().contains("compiler.err.cant.resolve")
                     : "Compiler locations and diagnostic codes must remain visible";
@@ -151,6 +156,37 @@ record BrokenLoggingProvider() implements TestCase {
             assert result.output().contains("java.lang.IllegalStateException: broken logging output")
                     && result.output().contains("at example.logging/example.Broken.context")
                     : "Unexpected failures must retain their original stack trace";
+        }
+    }
+}
+
+record CliOutputChannels(String command) implements TestCase {
+    @Override public void run(TestTrail trail) throws Exception {
+        try (var f = Fixture.create()) {
+            var result = f.knit(command, "-Dknit.debug=true");
+            trail.note("stdout: " + result.stdout());
+            trail.note("stderr: " + result.stderr());
+            assert result.exit() == 0 : "Informational commands must succeed with debug enabled";
+            assert !result.stdout().isBlank() && result.stderr().isEmpty()
+                    : "Help and version must publish exclusively on stdout";
+        }
+    }
+}
+
+record SigningErrorLogging() implements TestCase {
+    @Override public void run(TestTrail trail) throws Exception {
+        try (var f = Fixture.create()) {
+            f.write("src/work.archaic.example/module-info.java", "module work.archaic.example {}");
+            f.write("knit.xml", "<knit version=\"1\"><signing publisher=\"archaic.work\" key-id=\"test\" private-key-env=\"KNIT_TEST_KEY\"/></knit>");
+            var key = f.write("bad.pk8", "invalid key");
+            var result = f.knitEnvironment(List.of("package", "work.archaic.example"), Map.of("KNIT_TEST_KEY", key.toString()));
+            trail.note(result.stderr());
+            assert result.exit() == 2 : "Invalid signing credentials must remain expected input failures";
+            assert result.stdout().isEmpty() : "Signing errors must use stderr";
+            assert result.stderr().lines().filter(line -> line.startsWith("knit: ")).count() == 1
+                    : "The command context must publish the signing failure once";
+            assert !result.stderr().contains("\tat ") && !result.stderr().contains("InvalidKeySpecException:")
+                    : "Expected signing errors must omit exception stack traces";
         }
     }
 }

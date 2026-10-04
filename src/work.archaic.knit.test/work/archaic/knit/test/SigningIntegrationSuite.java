@@ -28,6 +28,7 @@ record SignedPackage() implements TestCase {
             var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
             var key = author.root().resolve("private.pk8"); Files.write(key, keys.getPrivate().getEncoded());
             var packaged = author.knitEnvironment(List.of("package", "work.archaic.example"), Map.of("KNIT_TEST_KEY", key.toString())); trail.note(packaged.output());
+            assert packaged.stdout().isEmpty() && packaged.stderr().contains("sha256:") : "Signed packaging progress and hashes must use stderr";
             assert packaged.exit() == 0 : "Configured packaging must sign without DNS";
             var archive = author.packaged(packaged);
             assert Signing.check(archive, "work.archaic.example", keys.getPublic()) : "Published package must contain a valid signature";
@@ -58,11 +59,13 @@ record StandaloneSigning() implements TestCase {
             // verify must ignore unrelated or invalid project configuration.
             f.write("knit.xml", "invalid XML");
             var unsigned = f.knitCommand(List.of("verify", jar.toString()));
+            assert unsigned.stdout().isEmpty() && unsigned.stderr().contains("Verification: unsigned") : "Verification outcomes must use stderr";
             assert unsigned.exit() == 2 && unsigned.output().contains("Verification: unsigned") : "Unsigned verification must fail without reading project configuration or querying DNS";
             f.write("knit.xml", "<knit version=\"1\"><signing publisher=\"archaic.work\" key-id=\"test\" private-key-env=\"KNIT_TEST_KEY\"/></knit>");
             var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
             var key = f.root().resolve("private.pk8"); Files.write(key, keys.getPrivate().getEncoded());
             var signed = f.knitEnvironment(List.of("sign", jar.toString()), Map.of("KNIT_TEST_KEY", key.toString())); trail.note(signed.output());
+            assert signed.stdout().isEmpty() && signed.stderr().contains("Signed ") : "Signing progress must use stderr";
             assert signed.exit() == 0 && Signing.check(jar, "work.archaic.example", keys.getPublic()) : "Standalone signing must establish identity from the source descriptor";
             byte[] original = Files.readAllBytes(jar);
             var resign = f.knitEnvironment(List.of("sign", jar.toString()), Map.of("KNIT_TEST_KEY", key.toString()));

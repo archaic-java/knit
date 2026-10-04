@@ -1,5 +1,14 @@
 # Knit signing v1
 
+## Contents
+
+- [Configuration and keys](#configuration-and-keys)
+- [Modules and API](#modules-and-api)
+- [Artifact format](#artifact-format)
+- [DNSSEC implementation](#dnssec-implementation)
+- [Validation](#validation)
+
+
 Knit verifies that an artifact is signed by a key currently authorized by the
 DNSSEC-protected publisher domain corresponding to its JPMS module namespace.
 It does not establish historical authorization, artifact safety, or dependency
@@ -163,7 +172,7 @@ References: [systemd-resolved D-Bus API](https://www.freedesktop.org/software/sy
 
 ## Validation
 
-Run `javac @cmd/compile` and `java @cmd/test` with JDK 25. All three test modules
+Follow the [README build commands](../../../README.md#build-and-test) with JDK 25. All three test modules
 are included. Tests cover independent fixed-key canonical signature vectors (including UTF-8 ordering),
 raw-key encoding, repacking (including Unicode names), payload/name/metadata
 tampering, malformed/duplicate entries, directory payloads, authorization states,

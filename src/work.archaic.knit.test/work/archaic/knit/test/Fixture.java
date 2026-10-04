@@ -86,20 +86,36 @@ record Fixture(Path root, Path cache) implements AutoCloseable {
                 "-Xshare:off", "--module-path", root.resolve("out").toString(), "--module", entry).directory(root.toFile()));
     }
     static Result execute(ProcessBuilder builder) throws Exception {
-        Path capture = Files.createTempFile("knit-capture-", ".txt");
+        return execute(builder, process -> {});
+    }
+    static Result execute(ProcessBuilder builder, java.util.function.Consumer<Process> started) throws Exception {
+        Path stdout = Files.createTempFile("knit-stdout-", ".txt");
         try {
-            var process = builder.redirectErrorStream(true).redirectOutput(capture.toFile()).start();
-            if (!process.waitFor(60, TimeUnit.SECONDS)) {
-                process.destroyForcibly().waitFor();
-                throw new IOException("Subprocess timed out");
-            }
-            return new Result(process.exitValue(), Files.readString(capture));
-        } finally { Files.deleteIfExists(capture); }
+            Path stderr = Files.createTempFile("knit-stderr-", ".txt");
+            try {
+                var process = builder.redirectErrorStream(false).redirectOutput(stdout.toFile())
+                        .redirectError(stderr.toFile()).start();
+                try {
+                    started.accept(process);
+                    if (!process.waitFor(60, TimeUnit.SECONDS)) throw new IOException("Subprocess timed out");
+                    return new Result(process.exitValue(), Files.readString(stdout), Files.readString(stderr));
+                } finally {
+                    if (process.isAlive()) {
+                        process.destroyForcibly();
+                        if (!process.waitFor(5, TimeUnit.SECONDS))
+                            throw new IOException("Subprocess did not terminate after forced cleanup");
+                    }
+                }
+            } finally { Files.deleteIfExists(stderr); }
+        } finally { Files.deleteIfExists(stdout); }
     }
     @Override public void close() throws IOException {
         try (var paths = Files.walk(root)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
         }
     }
-    record Result(int exit, String output) {}
+    record Result(int exit, String stdout, String stderr) {
+        // Convenience for checks that do not assert inter-stream ordering.
+        String output() { return stdout + stderr; }
+    }
 }
